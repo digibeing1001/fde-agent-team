@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FDE Work Package v2.1",
+  "description": "工作包 JSON schema - 从 v2.0 ASCII 文本模板升级为结构化 JSON。新增 depends_on 字段表达任务依赖，user_constraints 独立字段持久化用户附加指令。",
+  "type": "object",
+  "required": ["work_package_id", "project_id", "version", "phase", "status", "depends_on", "tasks", "user_constraints", "decision_log"],
+  "properties": {
+    "work_package_id": {
+      "type": "string",
+      "description": "工作包唯一标识，如 wp-001"
+    },
+    "project_id": {
+      "type": "string",
+      "description": "项目 ID，用于多项目隔离，如 FDE-202607-001"
+    },
+    "version": {
+      "type": "string",
+      "description": "工作包版本，如 v1, v2"
+    },
+    "phase": {
+      "type": "string",
+      "enum": ["presales", "research", "implementation", "delivery", "continuous"],
+      "description": "当前项目阶段"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending_acceptance", "accept", "in_progress", "blocked", "needs_review", "completed", "failed", "rework"],
+      "description": "工作包状态"
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "依赖的其他工作包 ID 列表（v2.0 缺失，v2.1 新增）"
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task_id", "step_order", "agent", "task_description", "expected_outputs", "pass_conditions"],
+        "properties": {
+          "task_id": {"type": "string"},
+          "step_order": {"type": "integer", "description": "执行顺序"},
+          "agent": {
+            "type": "string",
+            "enum": ["echo", "delta", "productize", "research", "knowledge-curator", "qa", "legal", "coach"]
+          },
+          "task_description": {"type": "string"},
+          "input_refs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "输入材料引用（飞书文档URL/文件路径/原始文本）"
+          },
+          "user_constraints_to_pass": {
+            "type": "object",
+            "description": "传递给该子 agent 的用户约束（原样传递）",
+            "properties": {
+              "language": {"type": "string"},
+              "knowledge_base": {"type": "string"},
+              "sources": {"type": "array", "items": {"type": "string"}},
+              "forbidden_sources": {"type": "array", "items": {"type": "string"}},
+              "date_range": {"type": "string"},
+              "min_sources_per_fact": {"type": "integer"},
+              "custom": {"type": "array", "items": {"type": "string"}}
+            }
+          },
+          "expected_outputs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "期望产出物列表"
+          },
+          "pass_conditions": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "通过条件，必须全部满足才能进下一步"
+          },
+          "result": {
+            "type": "object",
+            "description": "执行结果（完成后回填）",
+            "properties": {
+              "status": {"type": "string", "enum": ["completed", "failed", "rework"]},
+              "artifacts": {"type": "array"},
+              "constraints_followed": {"type": "array", "items": {"type": "string"}},
+              "completed_at": {"type": "string", "format": "date-time"}
+            }
+          }
+        }
+      }
+    },
+    "user_constraints": {
+      "type": "object",
+      "description": "用户附加约束（v2.0 混入人类备注自由文本，v2.1 独立字段持久化）",
+      "properties": {
+        "language": {"type": "string"},
+        "knowledge_base": {"type": "string", "description": "用户指定的知识库 ID（如 getnote:Q0GpeEvJ）"},
+        "sources": {"type": "array", "items": {"type": "string"}},
+        "forbidden_sources": {"type": "array", "items": {"type": "string"}},
+        "date_range": {"type": "string"},
+        "min_sources_per_fact": {"type": "integer", "default": 2},
+        "custom": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "decision_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "decision": {"type": "string"},
+          "rationale": {"type": "string"},
+          "decided_by": {"type": "string"},
+          "timestamp": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "human_notes": {
+      "type": "string",
+      "description": "人类成员自由添加的观察和指示（v2.0 保留，但用户约束已移到独立字段）"
+    },
+    "budget_tracking": {
+      "type": "object",
+      "properties": {
+        "max_budget_tokens": {"type": "integer"},
+        "used_tokens": {"type": "integer"},
+        "warning_threshold": {"type": "number", "default": 0.8}
+      }
+    }
+  },
+  "status_transitions": {
+    "pending_acceptance": ["accept", "request_context", "reject"],
+    "accept": ["in_progress", "blocked"],
+    "in_progress": ["completed", "needs_review", "failed"],
+    "needs_review": ["completed", "rework"],
+    "completed": [],
+    "failed": ["rework"]
+  }
+}

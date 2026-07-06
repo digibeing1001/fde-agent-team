@@ -1,0 +1,260 @@
+# FDE Agent Team - 平台无关单一真相源
+# 版本: 2.1.0
+# 核算时间: 2026-07-06
+#
+# 本文件是平台无关的 agent team 定义，各平台适配器（adapters/）负责翻译为平台特定格式。
+# Hermes/OpenClaw 保持向后兼容（读 SKILL.md + agents/ 目录），其他平台读本文件 + tools.schema.json。
+
+team_id: fde-agent-team
+version: "2.1.0"
+name: "FDE Agent Team"
+philosophy: "卖结果不卖软件 - Palantir FDE 模式的 AI Agent 化实现"
+
+# ============ Secretary Agent (编排者) ============
+secretary:
+  id: fde-lead
+  name: "FDE Lead"
+  role: orchestrator
+  role_card: agents/fde-lead/SKILL.md
+  tools_schema: config/tools.schema.json
+  flow: plan_then_execute  # 强制 Plan-then-Execute
+  output_enforcement: config/output_enforcement.yaml  # v2.1 P2 修正：从 response_format: json_schema 改为三层降级策略引用
+  hard_rules:
+    - "禁止自己执行检索/写代码/写PRD/写文章等具体任务，必须通过 call_* 工具委派"
+    - "首次输出必须是合法 JSON execution_plan，禁止在输出 plan 前调用任何工具"
+    - "用户附加指令必须原样传给子 agent 的 user_constraints 字段"
+    - "执行中不允许重新规划（除非显式调用 replan 工具）"
+    - "每步必须完成后才能进下一步，遇 Gate 必须停下等用户确认"
+  sub_skills:
+    - id: fde-loop-control
+      version: "2.1"
+      change: "从 prompt 描述升级为 state_machine.json 强制约束"
+    - id: fde-work-package
+      version: "2.1"
+      change: "从 ASCII 文本模板升级为 work-package-schema.json"
+    - id: fde-pm-clarity
+      version: "2.0"
+      change: "保留"
+    - id: fde-agent-router
+      version: "2.1"
+      change: "从关键词路由升级为 function calling tool 调度"
+    - id: fde-human-gate
+      version: "2.1"
+      change: "从 prompt 模板升级为程序化 interrupt_before"
+    - id: fde-qa-check
+      version: "2.1"
+      change: "新增 user_constraint_compliance 维度"
+    - id: fde-team-log-reader
+      version: "2.0"
+      change: "保留"
+
+# ============ Worker Agents (执行者) ============
+agents:
+  echo:
+    name: "Echo Agent"
+    type: producer
+    role_card: agents/echo-agent/SKILL.md
+    tool_name: call_echo_agent
+    skills: [echo-observation-extract, echo-need-analysis, echo-info-denoise]
+    sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}
+    boundary: "仅做感知/分析，不做执行/写代码/写报告"
+
+  delta:
+    name: "Delta Agent"
+    type: producer
+    role_card: agents/delta-agent/SKILL.md
+    tool_name: call_delta_agent
+    skills: [delta-prototype-build, delta-tech-select, delta-code-impl, delta-inversion-check]
+    sla: {expected: "2h", timeout: "8h", fallback: "gpt-4o"}
+    boundary: "仅做执行/原型/代码，不做感知/审查/交付物制作"
+
+  productize:
+    name: "Productize Agent"
+    type: producer
+    role_card: agents/productize-agent/SKILL.md
+    tool_name: call_productize_agent
+    skills: [productize-delivery, productize-retrospective, productize-knowledge, productize-template]
+    sla: {expected: "1h", timeout: "4h", fallback: "gpt-4o"}
+    boundary: "仅做交付物/复盘/沉淀，不做执行/审查"
+
+  research:
+    name: "Research Agent"
+    type: producer
+    role_card: agents/research-agent/SKILL.md
+    tool_name: call_research_agent
+    skills: [research-industry, research-competitive, research-tech-trend]
+    sla: {expected: "1h", timeout: "4h", fallback: "gpt-4o"}
+    boundary: "仅做调研，不做执行/审查/交付物"
+    must_pass_user_constraints: true  # 用户指定知识库时必须传递
+
+  knowledge-curator:
+    name: "Knowledge Curator"
+    type: producer
+    role_card: agents/knowledge-curator/SKILL.md
+    tool_name: call_knowledge_curator
+    skills: [kc-taxonomy, kc-tag-rules, kc-archive-clean]
+    sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}
+    boundary: "管结构不产内容，与 QA 协作（QA 管内容，KC 管结构）"
+
+  qa:
+    name: "QA Agent"
+    type: gatekeeper
+    role_card: agents/qa-agent/SKILL.md
+    tool_name: call_qa_agent
+    sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}
+    boundary: "独立于生产链，自己审自己是致命缺陷"
+    review_dimensions_v21:
+      - quality          # 质感审
+      - red_line         # 红线审
+      - ai_smell         # AI 味检测
+      - completeness     # 完整性门控
+      - test_coverage    # 测试覆盖
+      - version_diff     # 版本对比
+      - user_constraint_compliance  # v2.1 新增：用户约束遵循审查
+
+  legal:
+    name: "Legal Agent"
+    type: gatekeeper
+    role_card: agents/legal-agent/SKILL.md
+    tool_name: call_legal_agent
+    skills: [legal-triage, legal-contract-review, legal-privacy-data, legal-product-compliance, legal-employment-ip, legal-dispute-triage]
+    sla: {expected: "1h", timeout: "4h", fallback: "gpt-4o"}
+    boundary: "输出审查草稿，不替代执业律师；与 QA 双门禁协调"
+
+  coach:
+    name: "Coach Agent"
+    type: gatekeeper
+    role_card: agents/coach-agent/SKILL.md
+    tool_name: call_coach_agent
+    skills: [coach-agent-evaluation, coach-team-retrospective, coach-model-audit, coach-cognitive-surrender]
+    sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}
+    boundary: "不参与交付，仅做评估/复盘/审计"
+
+# ============ 流程编排 ============
+flow:
+  type: state_machine
+  definition: agents/fde-lead/skills/fde-loop-control/state_machine.json
+  four_step: [context, decide, act, evaluate]
+  gates:
+    - gate_name: "阶段切换"
+      trigger: "售前→调研→实施→交付→持续"
+      action: "interrupt_before, 必须用户确认"
+    - gate_name: "质量门"
+      trigger: "交付物产出后"
+      action: "call_qa_agent, verdict=pass 才进下一步"
+    - gate_name: "法律门"
+      trigger: "涉及合同/隐私/IP 时"
+      action: "call_legal_agent, 强制入口"
+    - gate_name: "复盘门"
+      trigger: "项目结束/阶段结束"
+      action: "call_coach_agent"
+  anti_skip_protocol:
+    version: "2.1"
+    implementation: "程序化 interrupt_before + JSON schema 强制输出"
+    format:
+      current_step: string
+      next_step: string
+      waiting_for: "user_confirmation"
+      produced_outputs: array
+      pass_conditions_met: boolean
+
+# ============ 用户约束持久化 ============
+constraints_persistence:
+  storage: shared_memory  # 约束持久化 + prompt 末尾注入
+  field: user_constraints
+  injection_point: "system_prompt_end"  # 末尾位置记忆最强
+  reiterate_in_user_message: true  # 每轮 user message 开头重申
+  verification_by: "qa_agent"  # QA 验证约束遵循
+  # v2.1 P3 修正：明确执行者，避免 LLM 自觉注入（不可靠）
+  # 核心原则：LLM 决策 + 代码执行分离
+  #   - LLM 只决定 next_agent（生成 call_* tool 调用，参数含 user_constraints_to_pass）
+  #   - 适配器代码层拦截 call_* 工具调用，自动从工作包读取 user_constraints 并注入到子 agent system prompt 末尾
+  #   - 子 agent 不依赖 LLM 自觉传递约束，约束注入是硬性代码保证
+  executor:
+    decision_maker: "fde_lead_llm"  # LLM 决定调用哪个 agent
+    injection_executor: "adapter_code_layer"  # 适配器代码层执行注入（不是 LLM）
+    injection_trigger: "on_call_tool_intercept"  # 拦截 call_* 工具调用时触发
+    injection_source: "work_package.user_constraints"  # 从工作包读取，不从 LLM 输出读
+    failure_mode: "fail_closed"  # 注入失败 = 任务失败，不让子 agent 无约束执行
+  # 参考实现：LangGraph Supervisor 的 Command(goto, update) 模式
+  #   - LLM 输出 Command(goto="research_agent", update={"user_constraints": ...})
+  #   - 框架自动把 update 中的内容注入到目标 agent 的 state
+  #   - 非 LangGraph 平台由 adapters/state_guard.py 实现等价拦截
+  reference_pattern: "LangGraph Command(goto, update)"
+  schema:
+    language: string
+    knowledge_base: string  # 如 "getnote:Q0GpeEvJ"
+    sources: array
+    forbidden_sources: array
+    date_range: string
+    min_sources_per_fact: integer
+    custom: array
+
+# ============ 工作包结构 ============
+work_package:
+  schema: docs/work-package-schema.json
+  format: json  # v2.1 从 ASCII 文本升级为 JSON
+  required_fields: [work_package_id, project_id, version, phase, status, depends_on, tasks, user_constraints, decision_log]
+  status_transitions:
+    pending_acceptance: [accept, request_context, reject]
+    accept: [in_progress, blocked]
+    in_progress: [completed, needs_review, failed]
+    needs_review: [completed, rework]
+    completed: []  # 终态
+    failed: [rework]  # 可重做
+
+# ============ 平台兼容性 ============
+platform_compat:
+  hermes_openclaw:
+    entrypoint: SKILL.md
+    router: fde-agent-router skill
+    native: true
+    backward_compatible: true
+  coze:
+    mode: multi_agent
+    adapter: adapters/coze/
+  dify:
+    mode: workflow
+    adapter: adapters/dify/
+  langgraph:
+    mode: state_graph
+    adapter: adapters/langgraph/
+    supervisor_pattern: true
+  trae:
+    mode: skill_task
+    adapter: adapters/trae/
+  workbuddy:
+    mode: config
+    adapter: adapters/workbuddy/
+
+# ============ 依赖抽象 ============
+platform_abstractions:
+  file_storage:
+    interface: "read(path), write(path, content), mkdir(parent, name)"
+    feishu_impl: "lark-cli drive/docx"
+    coze_impl: "Coze 知识库 API"
+    langgraph_impl: "checkpoint filesystem"
+  message_bus:
+    interface: "send(target, message), poll(filter)"
+    feishu_impl: "lark-cli im"
+    coze_impl: "Coze 消息节点"
+  state_store:
+    interface: "get(project_id, key), set(project_id, key, value)"
+    feishu_impl: "飞书文档作为 KV"
+    langgraph_impl: "StateGraph state"
+
+# ============ 保留的好设计 (v2.0) ============
+preserved_designs:
+  - three_layer_penetration: "L1自检/L2互检/L3门禁"
+  - qa_independence: "QA 独立于生产链"
+  - sla_metadata: "每个 agent 有 expected/timeout/fallback"
+  - error_self_diagnosis: "每个 agent 0号职责是错误自诊断"
+  - event_notification: "agent 完成后主动通知"
+  - failure_mode_self_check: "输出前扫描常见反模式"
+  - pm_clarity_framework: "5工具+4步推理+3步调查"
+  - quality_knowledge_assets: "失败模式/最佳实践/技巧三类"
+  - phase_rollback: "阶段回退协议"
+  - multi_project_isolation: "project_id 全链路隔离"
+  - budget_management: "项目级 max_budget + 80%预警"
+  - task_priority: "P0-P3 + 同级冲突解决"
+  - gatekeeper_vs_producer: "结构性避免利益冲突"

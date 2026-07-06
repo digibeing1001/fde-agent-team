@@ -1,0 +1,61 @@
+{
+  "platform": "feishu",
+  "platform_version": "v2.1",
+  "description": "平台配置 - v2.0 硬编码在 SKILL.md 中的平台特定值，v2.1 移到独立配置文件，各平台适配器读取此文件",
+
+  "getnote_topic_id": "Q0GpeEvJ",
+  "getnote_api_key_env": "GETNOTE_API_KEY",
+  "getnote_client_id_env": "GETNOTE_CLIENT_ID",
+
+  "project_folder_template": "{platform}://{project_id}/",
+  "phase_folders": {
+    "presales": "01-售前",
+    "research": "02-调研",
+    "implementation": "03-实施",
+    "delivery": "04-交付",
+    "continuous": "05-持续"
+  },
+
+  "litellm_router": {
+    "enabled": true,
+    "config_path": "config/litellm_config.yaml"
+  },
+
+  "platform_adapters": {
+    "feishu": {
+      "enabled": true,
+      "adapter_path": "adapters/feishu/",
+      "file_storage_impl": "FeishuStorage (lark-cli drive/docx)",
+      "message_bus_impl": "FeishuMessageBus (lark-cli im)",
+      "state_store_impl": "FeishuStateStore (飞书文档作为 KV)"
+    },
+    "coze": {
+      "enabled": false,
+      "adapter_path": "adapters/coze/",
+      "mode": "multi_agent"
+    },
+    "dify": {
+      "enabled": false,
+      "adapter_path": "adapters/dify/",
+      "mode": "workflow"
+    },
+    "langgraph": {
+      "enabled": false,
+      "adapter_path": "adapters/langgraph/",
+      "mode": "state_graph",
+      "supervisor_pattern": true
+    },
+    "trae": {
+      "enabled": false,
+      "adapter_path": "adapters/trae/",
+      "mode": "skill_task"
+    },
+    "workbuddy": {
+      "enabled": false,
+      "adapter_path": "adapters/workbuddy/",
+      "mode": "config"
+    }
+  },
+
+  "active_adapter": "feishu"
+}

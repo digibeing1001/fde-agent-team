@@ -1,0 +1,61 @@
+{
+  "test_id": "T3-user-constraints-persist",
+  "test_name": "用户附加指令是否被持久化传递（不丢失）",
+  "pain_point": "痛点4: 用户附加指令被忽略",
+  "priority": "P0",
+  "test_scenario": "用户附加多个约束（指定知识库/禁止源/语言/时间范围），验证约束被抽取、持久化、注入子 agent prompt 末尾、QA 验证遵循",
+  "input": {
+    "user_message": "调研 LLM Agent 在科研领域的最新进展。要求：1.只搜 arxiv，不要用 Google Scholar；2.用中文输出；3.时间范围2024年至今；4.每个事实至少2个独立来源验证；5.输出PPT格式",
+    "context": {"project_id": "TEST-202607-003", "phase": "research"}
+  },
+  "expected_constraints_extracted": {
+    "sources": ["arxiv"],
+    "forbidden_sources": ["google_scholar"],
+    "language": "zh",
+    "date_range": "2024-01-01..now",
+    "min_sources_per_fact": 2,
+    "custom": ["输出PPT格式"]
+  },
+  "expected_behavior": {
+    "step_1_extraction": {
+      "requirement": "FDE Lead 首轮 plan 的 user_constraints 数组包含所有 5 条约束",
+      "validation": "plan.user_constraints.length >= 5 且包含上述字段"
+    },
+    "step_2_persistence": {
+      "requirement": "约束写入工作包 user_constraints 字段（独立 object，非混入 human_notes 自由文本）",
+      "validation": "work_package.user_constraints 是 object，有 sources/forbidden_sources/language/date_range/min_sources_per_fact/custom 字段"
+    },
+    "step_3_injection_to_subagent": {
+      "requirement": "调用 research_agent 时，user_constraints 原样传入 tool 参数",
+      "validation": "call_research_agent.args.user_constraints.sources === ['arxiv'] && .forbidden_sources === ['google_scholar']"
+    },
+    "step_4_prompt_end_injection": {
+      "requirement": "research_agent 的 system prompt 末尾注入强制约束块（末尾位置记忆最强）",
+      "validation": "research_agent.system_prompt 末尾包含 '[强制用户约束 - 不可违反]' 块"
+    },
+    "step_5_qa_verification": {
+      "requirement": "QA Agent 审查 user_constraint_compliance 维度",
+      "validation": "call_qa_agent.args.review_dimensions 包含 'user_constraint_compliance' 且 user_constraints_to_check 非空"
+    },
+    "step_6_constraints_followed_in_output": {
+      "requirement": "research_agent 输出的 sources 中无 google_scholar",
+      "validation": "research_output.sources.every(s => !s.url.includes('scholar.google'))"
+    },
+    "step_7_multi_round_retention": {
+      "requirement": "多轮对话后约束仍被遵循（第 3 轮仍检查约束）",
+      "validation": "round_3 的 research_output 仍符合 user_constraints"
+    }
+  },
+  "validation_checks": [
+    {"check": "约束被抽取到 plan", "pass_condition": "plan.user_constraints.length >= 5"},
+    {"check": "约束写入工作包独立字段", "pass_condition": "work_package.user_constraints 是 object"},
+    {"check": "约束传入 research_agent tool 参数", "pass_condition": "research_tool_call.args.user_constraints.sources === ['arxiv']"},
+    {"check": "research_agent prompt 末尾有约束块", "pass_condition": "research_prompt.endsWith('[强制用户约束]')"},
+    {"check": "QA 审查 user_constraint_compliance", "pass_condition": "qa_review.dimensions.includes('user_constraint_compliance')"},
+    {"check": "输出无 google_scholar 来源", "pass_condition": "!output.sources.some(s => s.url.includes('scholar'))"},
+    {"check": "多轮后约束仍被遵循", "pass_condition": "round_3_output 符合 user_constraints"}
+  ],
+  "v2_0_failure_mode": "v2.0 用户约束混入'人类备注'自由文本，多轮后丢失（长上下文中段信息被忽略）；QA 不审查用户约束遵循",
+  "v2_1_fix": "v2.1 user_constraints 独立 object 字段持久化；每次调用子 agent 前注入 system prompt 末尾；每轮 user message 开头重申；QA 新增 user_constraint_compliance 审查维度",
+  "sources": ["末尾位置记忆最强原则", "Anthropic Multi-Agent Research System 原则: 保存计划到 Memory", "work-package-schema.json v2.1"]
+}

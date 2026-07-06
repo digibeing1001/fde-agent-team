@@ -1,0 +1,76 @@
+{
+  "test_id": "T5-cross-platform",
+  "test_name": "跨平台兼容性验证",
+  "pain_point": "痛点5: 导入后基本无法运作",
+  "priority": "P1",
+  "test_scenario": "验证修正后的 agent team 定义是否能导入 Coze/Dify/LangGraph/Trae 等多平台",
+  "input": {
+    "team_definition_files": [
+      "team.yaml",
+      "config/tools.schema.json",
+      "config/platform.json",
+      "agents/fde-lead/SKILL.md (v2.1 patched)",
+      "agents/*/SKILL.md (v2.1 patched)",
+      "agents/fde-lead/skills/fde-loop-control/state_machine.json",
+      "docs/work-package-schema.json",
+      "docs/platform-adapter-spec.md"
+    ]
+  },
+  "expected_behavior": {
+    "platform_hermes": {
+      "requirement": "Hermes/OpenClaw 向后兼容",
+      "validation": "active_adapter=feishu 时使用 FeishuStorage/FeishuMessageBus/FeishuStateStore，SKILL.md 作为 entrypoint 正常加载"
+    },
+    "platform_coze": {
+      "requirement": "Coze 适配器把 team.yaml 翻译为 Coze 多 agent 模式",
+      "validation": "adapters/coze/translate.py 生成 Coze bot 节点配置，8 个 agent 注册为 bot，fde-lead 作为主 bot 调度"
+    },
+    "platform_dify": {
+      "requirement": "Dify 适配器把 team.yaml 翻译为 Dify workflow",
+      "validation": "adapters/dify/translate.py 生成 Dify workflow 节点，state_machine 转为 workflow 边"
+    },
+    "platform_langgraph": {
+      "requirement": "LangGraph 适配器把 team.yaml 翻译为 StateGraph 代码",
+      "validation": "adapters/langgraph/translate.py 生成 supervisor.py + graph.py，fde-lead 作为 supervisor，gate 节点用 interrupt_before"
+    },
+    "platform_trae": {
+      "requirement": "Trae 适配器把 team.yaml 翻译为 Skill + Task",
+      "validation": "adapters/trae/translate.py 生成 SKILL.md + task config，8 个 agent 注册为 tool"
+    },
+    "no_hardcoded_feishu": {
+      "requirement": "SKILL.md 中无硬编码 lark-cli 命令",
+      "validation": "grep 'lark-cli' agents/*/SKILL.md 返回 0 结果（lark-cli 已移到 adapters/feishu/）"
+    },
+    "no_hardcoded_topic_id": {
+      "requirement": "SKILL.md 中无硬编码 topic_id: Q0GpeEvJ",
+      "validation": "grep 'Q0GpeEvJ' agents/*/SKILL.md 返回 0 结果（已移到 config/platform.json）"
+    },
+    "file_storage_interface": {
+      "requirement": "所有文件操作通过 FileStorage 接口",
+      "validation": "SKILL.md 中引用 FileStorage.read/write/mkdir，不直接调用平台命令"
+    },
+    "tools_schema_portable": {
+      "requirement": "tools.schema.json 是平台无关 JSON schema",
+      "validation": "JSON 可被各平台适配器解析，无平台特定字段"
+    },
+    "state_machine_portable": {
+      "requirement": "state_machine.json 是平台无关状态机定义",
+      "validation": "JSON 可被 LangGraph/Dify/Coze 适配器翻译为各自的 graph/workflow/节点配置"
+    }
+  },
+  "validation_checks": [
+    {"check": "Hermes 向后兼容", "pass_condition": "active_adapter=feishu 时 SKILL.md 正常加载"},
+    {"check": "Coze 适配器存在", "pass_condition": "adapters/coze/translate.py 存在且可运行"},
+    {"check": "Dify 适配器存在", "pass_condition": "adapters/dify/translate.py 存在且可运行"},
+    {"check": "LangGraph 适配器存在", "pass_condition": "adapters/langgraph/translate.py + supervisor.py 存在"},
+    {"check": "Trae 适配器存在", "pass_condition": "adapters/trae/translate.py 存在"},
+    {"check": "SKILL.md 无硬编码 lark-cli", "pass_condition": "grep 'lark-cli' agents/*/SKILL.md 返回 0 结果"},
+    {"check": "SKILL.md 无硬编码 topic_id", "pass_condition": "grep 'Q0GpeEvJ' agents/*/SKILL.md 返回 0 结果"},
+    {"check": "FileStorage 接口被引用", "pass_condition": "SKILL.md 中有 FileStorage.read/write/mkdir 引用"},
+    {"check": "tools.schema.json 平台无关", "pass_condition": "JSON 无平台特定字段"},
+    {"check": "state_machine.json 平台无关", "pass_condition": "JSON 可被多平台适配器翻译"}
+  ],
+  "v2_0_failure_mode": "v2.0 深度耦合飞书生态：硬编码 lark-cli 命令、硬编码 topic_id: Q0GpeEvJ、硬编码飞书路径 01-售前/。导入 Coze/Dify/LangGraph/Trae 时这些全部失效",
+  "v2_1_fix": "v2.1 抽象 FileStorage/MessageBus/StateStore 三大接口；平台特定值移到 config/platform.json；SKILL.md 用接口而非命令；各平台有 adapters/ 适配器",
+  "sources": ["业界无统一 agent team 定义标准", "Anthropic Building effective agents", "platform-adapter-spec.md v2.1"]
+}

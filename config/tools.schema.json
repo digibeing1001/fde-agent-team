@@ -1,0 +1,274 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "team_id": "fde-agent-team",
+  "version": "2.1.0",
+  "description": "FDE Agent Team - 8 个执行 Agent 注册为 function calling tool，FDE Lead 必须通过 call_* 工具委派，禁止自己执行任务。平台无关定义，各平台适配器负责翻译为平台特定格式。",
+  "design_principles": [
+    "Anthropic Multi-Agent Research System: orchestrator-worker 模式",
+    "LangGraph Multi-agent Supervisor: function calling 调用 worker",
+    "Plan-then-Execute: 先出 JSON plan 再执行",
+    "用户约束放 prompt 末尾（末尾位置记忆最强）"
+  ],
+  "secretary_agent": {
+    "id": "fde-lead",
+    "name": "FDE Lead",
+    "role": "orchestrator",
+    "hard_rules": [
+      "禁止自己执行检索/写代码/写PRD/写文章等具体任务，必须通过 call_* 工具委派",
+      "首次输出必须是合法 JSON execution_plan，禁止在输出 plan 前调用任何工具",
+      "用户附加指令必须原样传给子 agent 的 user_constraints 字段",
+      "执行中不允许重新规划（除非显式调用 replan 工具）",
+      "每步必须完成后才能进下一步，遇 Gate 必须停下等用户确认"
+    ],
+    "tools_allow": [
+      "call_echo_agent",
+      "call_delta_agent",
+      "call_productize_agent",
+      "call_research_agent",
+      "call_knowledge_curator",
+      "call_qa_agent",
+      "call_legal_agent",
+      "call_coach_agent"
+    ],
+    "tools_deny": [
+      "write_doc",
+      "write_code",
+      "write_file",
+      "edit_file",
+      "search_web",
+      "web_search",
+      "execute_bash",
+      "run_command",
+      "create_document",
+      "generate_content",
+      "compose_article",
+      "draft_prd"
+    ],
+    "tools_policy": {
+      "principle": "工具白名单本身即防代写约束：秘书只可见 call_* 委派工具，不可见任何执行类工具，从工具列表层杜绝代写。",
+      "claude_code_inheritance": "Claude Code subagent 自动继承父 allowlist，主 Agent 配置 tools_allow 后，子 Agent 也只能调用 call_* 工具",
+      "platform_translation": {
+        "claude_code": "subagent_type=fde-lead, allowlist=tools_allow",
+        "langgraph": "ToolNode(tools=tools_allow), 其他工具不注入",
+        "dify_v1.13_plus": "Agent 节点 tool_config 仅勾选 call_* 工具",
+        "coze": "Bot 工具配置仅启用 call_* 插件",
+        "c_class_wrapper": "adapters/state_guard.py 拦截非 call_* 工具调用并报错"
+      }
+    },
+    "output_enforcement": {
+      "config_ref": "./output_enforcement.yaml",
+      "description": "v2.1 P2 修正：response_format 从此文件移除，改由 output_enforcement.yaml 定义三层降级策略（Tier1 模型 API / Tier2 框架 / Tier3 prompt+parse+retry）。原 OpenAI 特定的 response_format.json_schema 不应假设所有平台支持。",
+      "target_schema_name": "execution_plan",
+      "platform_tier_mapping_ref": "output_enforcement.yaml#platform_tier_mapping"
+    }
+  },
+  "worker_tools": [
+    {
+      "name": "call_echo_agent",
+      "description": "调用 Echo Agent（感知专家）处理原始材料、提取结构化观察、需求分析、信息降噪。FDE Lead 禁止自己执行感知任务。",
+      "agent_id": "echo",
+      "agent_type": "producer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {"type": "string", "description": "任务唯一标识"},
+          "task_description": {"type": "string", "description": "具体任务描述"},
+          "input_refs": {"type": "array", "items": {"type": "string"}, "description": "输入材料引用（飞书文档URL/文件路径/原始文本）"},
+          "user_constraints": {"type": "object", "description": "用户附加约束，原样传递", "properties": {"language": {"type": "string"}, "knowledge_base": {"type": "string"}, "custom": {"type": "array", "items": {"type": "string"}}}},
+          "expected_output": {"type": "string", "enum": ["observation_report", "need_analysis", "denoised_info"], "description": "期望输出类型"},
+          "output_format": {"type": "string", "enum": ["json", "markdown"], "default": "json"}
+        },
+        "required": ["task_id", "task_description", "expected_output"]
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "verified_facts": {"type": "array"},
+          "hypotheses": {"type": "array"},
+          "uncertainties": {"type": "array"},
+          "evidence_strength": {"type": "string", "enum": ["high", "medium", "low"]},
+          "constraints_followed": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "call_delta_agent",
+      "description": "调用 Delta Agent（执行专家）搭建原型、写代码、部署 PoC。FDE Lead 禁止自己写代码。",
+      "agent_id": "delta",
+      "agent_type": "producer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {"type": "string"},
+          "task_description": {"type": "string"},
+          "input_refs": {"type": "array", "items": {"type": "string"}, "description": "Echo 观察报告/方案文档引用"},
+          "user_constraints": {"type": "object", "properties": {"tech_stack": {"type": "string"}, "forbidden_libs": {"type": "array", "items": {"type": "string"}}, "custom": {"type": "array", "items": {"type": "string"}}}},
+          "expected_output": {"type": "string", "enum": ["prototype", "code", "poc_deployment", "tech_selection_report"]},
+          "output_format": {"type": "string", "enum": ["json", "markdown", "code_files"], "default": "json"}
+        },
+        "required": ["task_id", "task_description", "expected_output"]
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "artifacts": {"type": "array", "description": "产出物引用列表"},
+          "tech_stack": {"type": "string"},
+          "test_results": {"type": "object"},
+          "inversion_check_passed": {"type": "boolean"},
+          "constraints_followed": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "call_productize_agent",
+      "description": "调用 Productize Agent（沉淀专家）制作交付物、项目复盘、知识沉淀。FDE Lead 禁止自己做 PPT/文档。",
+      "agent_id": "productize",
+      "agent_type": "producer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {"type": "string"},
+          "task_description": {"type": "string"},
+          "input_refs": {"type": "array", "items": {"type": "string"}},
+          "user_constraints": {"type": "object", "properties": {"style": {"type": "string", "description": "圆角蓝色系等"}, "audience": {"type": "string"}, "custom": {"type": "array", "items": {"type": "string"}}}},
+          "expected_output": {"type": "string", "enum": ["ppt", "document", "training_material", "retrospective", "knowledge_asset"]},
+          "output_format": {"type": "string", "default": "markdown"}
+        },
+        "required": ["task_id", "task_description", "expected_output"]
+      }
+    },
+    {
+      "name": "call_research_agent",
+      "description": "调用 Research Agent（调研专家）进行行业调研、竞品分析、技术趋势扫描。FDE Lead 禁止自己搜索。用户指定知识库时必须传入 user_constraints.knowledge_base 字段。",
+      "agent_id": "research",
+      "agent_type": "producer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {"type": "string"},
+          "task_description": {"type": "string"},
+          "research_scope": {"type": "string", "enum": ["industry", "competitive", "tech_trend", "policy"]},
+          "user_constraints": {
+            "type": "object",
+            "description": "用户附加约束，原样传递。用户指定知识库时必填 knowledge_base 字段。",
+            "properties": {
+              "knowledge_base": {"type": "string", "description": "用户指定的知识库 ID（如 getnote:Q0GpeEvJ）"},
+              "sources": {"type": "array", "items": {"type": "string"}, "description": "限定搜索源（如 ['arxiv', 'web', 'getnote']）"},
+              "forbidden_sources": {"type": "array", "items": {"type": "string"}, "description": "禁止使用的搜索源"},
+              "language": {"type": "string"},
+              "date_range": {"type": "string", "description": "时间范围限定"},
+              "min_sources_per_fact": {"type": "integer", "default": 2, "description": "每个事实至少 N 个独立来源验证"},
+              "custom": {"type": "array", "items": {"type": "string"}}
+            }
+          },
+          "expected_output": {"type": "string", "enum": ["industry_report", "competitive_analysis", "tech_trend_scan", "policy_review"]},
+          "output_format": {"type": "string", "enum": ["json", "markdown"], "default": "markdown"}
+        },
+        "required": ["task_id", "task_description", "research_scope", "user_constraints"]
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "sources": {"type": "array", "items": {"type": "object", "properties": {"url": {"type": "string"}, "title": {"type": "string"}, "retrieved_at": {"type": "string"}}}},
+          "key_findings": {"type": "array"},
+          "confidence": {"type": "number"},
+          "cross_verified": {"type": "boolean"},
+          "constraints_followed": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    {
+      "name": "call_knowledge_curator",
+      "description": "调用 Knowledge Curator（知识管家）管理知识库结构、分类标签、检索优化。FDE Lead 禁止自己整理知识库。",
+      "agent_id": "knowledge-curator",
+      "agent_type": "producer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {"type": "string"},
+          "task_description": {"type": "string"},
+          "action": {"type": "string", "enum": ["design_taxonomy", "manage_tags", "archive_clean", "detect_conflicts"]},
+          "target_knowledge_base": {"type": "string", "description": "目标知识库 ID"},
+          "user_constraints": {"type": "object"}
+        },
+        "required": ["task_id", "task_description", "action"]
+      }
+    },
+    {
+      "name": "call_qa_agent",
+      "description": "调用 QA Agent（质量门）执行 L3 门禁审查、AI 味检测、完整性门控、用户约束遵循审查。FDE Lead 禁止自己审查交付物。",
+      "agent_id": "qa",
+      "agent_type": "gatekeeper",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {"type": "string"},
+          "task_description": {"type": "string"},
+          "review_target_refs": {"type": "array", "items": {"type": "string"}, "description": "待审查的交付物引用"},
+          "review_dimensions": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["quality", "red_line", "ai_smell", "completeness", "test_coverage", "version_diff", "user_constraint_compliance"]},
+            "description": "审查维度。user_constraint_compliance 是 v2.1 新增：对照工作包 user_constraints 检查产出是否满足用户附加约束"
+          },
+          "user_constraints_to_check": {"type": "object", "description": "需要验证是否被遵守的用户约束清单"},
+          "expected_output": {"type": "string", "enum": ["review_report", "pass_fail", "rework_list"]}
+        },
+        "required": ["task_id", "review_target_refs", "review_dimensions"]
+      },
+      "returns": {
+        "type": "object",
+        "properties": {
+          "verdict": {"type": "string", "enum": ["pass", "fail", "rework"]},
+          "issues": {"type": "array"},
+          "user_constraint_violations": {"type": "array", "description": "用户约束违反清单（v2.1 新增）"}
+        }
+      }
+    },
+    {
+      "name": "call_legal_agent",
+      "description": "调用 Legal Agent（法律门）执行合同审查、隐私合规、IP 保护。FDE Lead 禁止自己做法律判断。",
+      "agent_id": "legal",
+      "agent_type": "gatekeeper",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {"type": "string"},
+          "task_description": {"type": "string"},
+          "channel": {"type": "string", "enum": ["triage", "contract_review", "privacy_data", "product_compliance", "employment_ip", "dispute_triage"]},
+          "input_refs": {"type": "array", "items": {"type": "string"}},
+          "user_constraints": {"type": "object"},
+          "expected_output": {"type": "string", "enum": ["review_draft", "compliance_check", "risk_assessment"]}
+        },
+        "required": ["task_id", "channel", "task_description"]
+      }
+    },
+    {
+      "name": "call_coach_agent",
+      "description": "调用 Coach Agent（教练）评估 Agent 能力、团队复盘、认知投降检测。FDE Lead 禁止自己评估团队。",
+      "agent_id": "coach",
+      "agent_type": "gatekeeper",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {"type": "string"},
+          "task_description": {"type": "string"},
+          "action": {"type": "string", "enum": ["agent_evaluation", "team_retrospective", "model_audit", "cognitive_surrender_check"]},
+          "evaluation_scope": {"type": "string", "description": "评估范围（单 Agent/全团队/跨任务）"},
+          "user_constraints": {"type": "object"}
+        },
+        "required": ["task_id", "action"]
+      }
+    }
+  ],
+  "platform_compatibility": {
+    "hermes_openclaw": {"entrypoint": "SKILL.md", "router": "fde-agent-router skill", "native": true},
+    "coze": {"mode": "multi_agent", "translation": "adapters/coze/translate.py"},
+    "dify": {"mode": "workflow", "translation": "adapters/dify/translate.py"},
+    "langgraph": {"mode": "state_graph", "translation": "adapters/langgraph/translate.py", "supervisor_pattern": true},
+    "trae": {"mode": "skill_task", "translation": "adapters/trae/translate.py"},
+    "workbuddy": {"mode": "config", "translation": "adapters/workbuddy/translate.py"},
+    "claude_code": {"mode": "subagent", "translation": "adapters/claude_code/translate.py", "allowlist_inheritance": true},
+    "microsoft_copilot_studio": {"mode": "topic_action", "translation": "adapters/copilot_studio/translate.py"},
+    "aws_bedrock": {"mode": "agent_collaboration", "translation": "adapters/bedrock/translate.py"}
+  }
+}

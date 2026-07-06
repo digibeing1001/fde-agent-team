@@ -1,0 +1,327 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "state_machine_id": "fde-loop-control",
+  "version": "2.1",
+  "description": "FDE 四步控制流状态机 - 从 prompt 描述升级为程序化 state machine。每个状态有明确的 next 和 gate 检查，状态转换必须输出对应 artifact（未输出则阻断）。",
+  "initial_state": "context",
+  "terminal_states": ["done", "aborted"],
+  "states": {
+    "context": {
+      "description": "第一阶段：上下文收集 - 通过 PM-Clarity Clarify 重述真问题",
+      "agent": "fde-lead",
+      "required_artifacts": ["reframed_problem.json"],
+      "actions": ["pm_clarity_clarify", "extract_user_constraints"],
+      "transitions": [
+        {
+          "to": "decide",
+          "condition": "reframed_problem 已输出 AND user_constraints 已抽取",
+          "artifact_required": "execution_plan.json (初版)"
+        }
+      ],
+      "gate": null
+    },
+    "decide": {
+      "description": "第二阶段：决策 - 输出完整 JSON execution_plan",
+      "agent": "fde-lead",
+      "required_artifacts": ["execution_plan.json"],
+      "actions": ["plan_then_execute", "task_decomposition"],
+      "transitions": [
+        {
+          "to": "act",
+          "condition": "execution_plan.json 合法 AND plan 数组非空 AND 每步有 expected_outputs 和 pass_conditions",
+          "artifact_required": "validated_plan.json"
+        },
+        {
+          "to": "context",
+          "condition": "PM-Clarity 发现真问题与原问题不同，需重新澄清",
+          "artifact_required": "reframe_request.json"
+        }
+      ],
+      "gate": null
+    },
+    "act": {
+      "description": "第三阶段：执行 - 按计划逐步调用子 agent",
+      "agent": "fde-lead (orchestrator) + worker agents",
+      "required_artifacts": ["step_results.json"],
+      "actions": ["call_worker_agent", "pass_user_constraints", "collect_results"],
+      "sub_steps": {
+        "type": "iterative",
+        "iterator": "plan[]",
+        "per_step_required": {
+          "call_tool": "call_{agent}_agent",
+          "pass_constraints": "user_constraints_to_pass 必须原样传入",
+          "collect_output": "expected_outputs 必须产出",
+          "check_pass_conditions": "pass_conditions 必须全部满足"
+        }
+      },
+      "transitions": [
+        {
+          "to": "evaluate",
+          "condition": "所有 step 完成 AND 所有 pass_conditions 满足",
+          "artifact_required": "complete_results.json"
+        },
+        {
+          "to": "gate_quality",
+          "condition": "任一 step 产出交付物",
+          "artifact_required": "deliverable_ref.json"
+        },
+        {
+          "to": "gate_legal",
+          "condition": "涉及合同/隐私/IP",
+          "artifact_required": "legal_trigger.json"
+        },
+        {
+          "to": "gate_phase",
+          "condition": "阶段切换（售前→调研→实施→交付→持续）",
+          "artifact_required": "phase_transition.json"
+        },
+        {
+          "to": "failed",
+          "condition": "step 重试超 max_retries OR 预算超支",
+          "artifact_required": "failure_report.json"
+        }
+      ],
+      "gate": null
+    },
+    "evaluate": {
+      "description": "第四阶段：评估 - 综合结果，QA 审查。失败时按多 Agent 失败模式分类法显式诊断根因。",
+      "agent": "fde-lead + qa-agent",
+      "required_artifacts": ["evaluation_report.json"],
+      "actions": ["synthesize_results", "qa_review", "user_constraint_compliance_check", "failure_classification"],
+      "failure_taxonomy": {
+        "categories": {
+          "task_verification_failure": {
+            "description": "最常见失败模式：未独立验证产出就判定完成",
+            "detection": "qa_verdict 缺失 OR QA 未被调用 OR QA 收到生成 trace",
+            "remediation": "回到 gate_quality 强制独立验证"
+          },
+          "system_design_issue": {
+            "description": "Agent 间职责边界模糊/角色重叠/缺失关键 Agent",
+            "detection": "多个 Agent 产出同类交付物 OR 关键交付物无 owner",
+            "remediation": "回到 context 重新规划 agent 分工"
+          },
+          "inter_agent_misalignment": {
+            "description": "Agent 间接口/格式/约束不一致",
+            "detection": "下游 Agent 报告上游产出格式不符 OR user_constraints 丢失",
+            "remediation": "回到 act 重新传递约束/对齐接口"
+          }
+        }
+      },
+      "transitions": [
+        {
+          "to": "done",
+          "condition": "evaluation.verdict == pass AND user_constraint_compliance == pass",
+          "artifact_required": "final_delivery.json"
+        },
+        {
+          "to": "gate_phase",
+          "condition": "阶段结束，需进下一阶段",
+          "artifact_required": "phase_end_report.json"
+        },
+        {
+          "to": "act",
+          "condition": "evaluation.verdict == rework",
+          "artifact_required": "rework_list.json"
+        },
+        {
+          "to": "context",
+          "condition": "evaluation 发现真问题理解错误",
+          "artifact_required": "reframe_request.json"
+        }
+      ],
+      "gate": null
+    },
+    "gate_phase": {
+      "description": "Gate: 阶段切换 - 程序化 interrupt_before，必须用户确认",
+      "agent": "fde-lead",
+      "type": "human_gate",
+      "blocking": true,
+      "implementation": "interrupt_before (LangGraph) / pause (Coze) / await_confirmation (Trae) / state_guard.py (Hermes)",
+      "required_artifacts": ["gate_protocol.json"],
+      "gate_protocol_schema": {
+        "gate_name": "string",
+        "current_step": "string",
+        "next_step": "string",
+        "waiting_for": "user_confirmation",
+        "produced_outputs": "array",
+        "pass_conditions_met": "boolean",
+        "key_questions_for_user": "array"
+      },
+      "validation": {
+        "pre_transition_check": "gate_protocol.json 必须存在 AND waiting_for == 'user_confirmation' AND 未收到 user_confirmation.json",
+        "executor_class": "A 类: LangGraph interrupt_before / B 类: Coze 条件节点 / C 类: adapters/state_guard.py",
+        "check_method": "code_level_block"
+      },
+      "on_invalid": {
+        "missing_gate_protocol": "block_transition + log_error + 提示 LLM 输出 gate_protocol.json",
+        "skip_without_confirmation": "block_transition + log_violation + 任务标记 failed，回退到 gate 重新执行",
+        "executor": "adapter_code_layer (非 LLM 自觉)"
+      },
+      "transitions": [
+        {
+          "to": "context",
+          "condition": "user_confirmed == true",
+          "artifact_required": "user_confirmation.json"
+        },
+        {
+          "to": "aborted",
+          "condition": "user_confirmed == false OR timeout",
+          "artifact_required": "abort_reason.json"
+        }
+      ]
+    },
+    "gate_quality": {
+      "description": "Gate: 质量门 - 调用 QA Agent，verdict=pass 才进下一步。独立验证原则：QA 不得接触被审查产出的生成 trace，只审查最终交付物本身，防自我合理化偏差。",
+      "agent": "qa-agent",
+      "type": "agent_gate",
+      "blocking": true,
+      "independence_guarantee": {
+        "principle": "验证 Agent 不可见被验证内容的生成过程（chain-of-thought/intermediate steps），只可见最终产出物。",
+        "input_contract": "QA 仅接收 review_target_refs（最终交付物引用）+ user_constraints_to_check，禁止传入 worker agent 的中间推理/plan/工具调用日志",
+        "violation_handling": "若 QA 收到了生成 trace，必须主动拒绝并要求重发仅含最终产出物的输入"
+      },
+      "implementation": "call_qa_agent(review_dimensions=[quality, red_line, ai_smell, completeness, test_coverage, version_diff, user_constraint_compliance])",
+      "required_artifacts": ["qa_review_report.json"],
+      "validation": {
+        "pre_transition_check": "qa_review_report.json 必须存在 AND qa_verdict 已判定 AND qa_review_report.independence_attested == true",
+        "executor_class": "A 类: LangGraph conditional_edge / B 类: Coze 条件节点 / C 类: adapters/state_guard.py",
+        "check_method": "code_level_block"
+      },
+      "on_invalid": {
+        "missing_qa_report": "block_transition + 提示调用 call_qa_agent",
+        "qa_not_invoked": "block_transition + 强制调用 call_qa_agent，禁止跳过",
+        "independence_violation": "QA 收到生成 trace = block + 重新以仅最终产出物输入调用 QA",
+        "executor": "adapter_code_layer (非 LLM 自觉)"
+      },
+      "transitions": [
+        {
+          "to": "act",
+          "condition": "qa_verdict == pass",
+          "artifact_required": "qa_pass.json"
+        },
+        {
+          "to": "act",
+          "condition": "qa_verdict == rework",
+          "artifact_required": "rework_list.json"
+        },
+        {
+          "to": "failed",
+          "condition": "qa_verdict == fail AND rework_count >= max_retries",
+          "artifact_required": "qa_fail.json"
+        }
+      ]
+    },
+    "gate_legal": {
+      "description": "Gate: 法律门 - 调用 Legal Agent，强制入口",
+      "agent": "legal-agent",
+      "type": "agent_gate",
+      "blocking": true,
+      "implementation": "call_legal_agent(channel=triage)",
+      "required_artifacts": ["legal_review_draft.json"],
+      "validation": {
+        "pre_transition_check": "legal_review_draft.json 必须存在 AND legal_verdict 已判定",
+        "executor_class": "A 类: LangGraph conditional_edge / B 类: Coze 条件节点 / C 类: adapters/state_guard.py",
+        "check_method": "code_level_block"
+      },
+      "on_invalid": {
+        "missing_legal_review": "block_transition + 强制调用 call_legal_agent",
+        "executor": "adapter_code_layer (非 LLM 自觉)"
+      },
+      "transitions": [
+        {
+          "to": "act",
+          "condition": "legal_verdict == pass",
+          "artifact_required": "legal_pass.json"
+        },
+        {
+          "to": "act",
+          "condition": "legal_verdict == needs_human_lawyer",
+          "artifact_required": "human_escalation.json"
+        }
+      ]
+    },
+    "done": {
+      "description": "终态：任务完成",
+      "agent": null,
+      "required_artifacts": ["final_delivery.json"],
+      "transitions": []
+    },
+    "failed": {
+      "description": "终态：任务失败（重试超限/预算超支/QA失败）",
+      "agent": "coach-agent",
+      "required_artifacts": ["failure_report.json"],
+      "actions": ["coach_retrospective"],
+      "transitions": [
+        {
+          "to": "context",
+          "condition": "coach 建议重试 AND budget_remaining > 0",
+          "artifact_required": "retry_recommendation.json"
+        }
+      ]
+    },
+    "aborted": {
+      "description": "终态：用户主动中止",
+      "agent": null,
+      "required_artifacts": ["abort_reason.json"],
+      "transitions": []
+    }
+  },
+  "global_constraints": {
+    "max_retries_per_step": 3,
+    "max_total_budget_tokens": 500000,
+    "budget_warning_threshold": 0.8,
+    "timeout_per_step_minutes": {
+      "echo": 30,
+      "delta": 120,
+      "productize": 60,
+      "research": 60,
+      "knowledge-curator": 30,
+      "qa": 30,
+      "legal": 60,
+      "coach": 30
+    },
+    "fallback_model": "gpt-4o"
+  },
+  "anti_skip_enforcement": {
+    "mechanism": "programmatic_interrupt_before",
+    "implementation": "gate 节点在 state machine 中定义，执行前程序化阻断，非 prompt 模板",
+    "violation_handling": "未输出 gate_protocol.json 直接进入下一状态 = 任务失败，回退到 gate 重新执行",
+    "platform_execution_layers": {
+      "A_class_native": {
+        "platforms": ["langgraph", "dify_v1.13_plus", "microsoft_agent_framework", "claude_code", "microsoft_copilot_studio", "aws_bedrock_multi_agent"],
+        "executor": {
+          "langgraph": "StateGraph conditional_edge + interrupt_before + Checkpointer 状态持久化",
+          "dify_v1.13_plus": "workflow HITL 节点（v1.13.0+ 原生支持）",
+          "microsoft_agent_framework": "MAF Checkpoint + conditional routing",
+          "claude_code": "subagent allowlist 继承机制 + Task tool 委派（主 Agent 工具白名单自动限制为 call_*_agent，禁止 write/edit/bash 等执行工具）",
+          "microsoft_copilot_studio": "Topic + Trigger + Action 链 + HITL Card",
+          "aws_bedrock_multi_agent": "Bedrock Agent Collaboration + supervisor pattern"
+        },
+        "reliability": "highest",
+        "config_field": "validation.executor_class = A 类"
+      },
+      "B_class_conditional": {
+        "platforms": ["coze", "feishu_bot", "tencent_yuanqi"],
+        "executor": "workflow 条件节点 + 人工确认节点",
+        "reliability": "high",
+        "config_field": "validation.executor_class = B 类"
+      },
+      "C_class_wrapper": {
+        "platforms": ["hermes_openclaw", "trae", "workbuddy", "feishu"],
+        "executor": "adapters/state_guard.py 包装器（拦截非法状态转换）",
+        "reliability": "medium_high",
+        "config_field": "validation.executor_class = C 类",
+        "wrapper_spec": "见 adapters/state_guard.py - StateGuard 类包装 LLM 调用，每次状态转换前检查 validation.pre_transition_check，未通过则拒绝转换并返回错误",
+        "c_class_anti_skip_protocol": {
+          "version": "2.2",
+          "hard_constraints": [
+            "输出格式锁：秘书首条输出必须是合法 JSON execution_plan，否则 state_guard 拒绝推进",
+            "@call_* 占位符强制：必须出现 @call_<agent_id> 标记，否则视为秘书代写",
+            "self_check 四问：每步完成后秘书必须输出 self_check JSON 块（step_done/artifact_produced/constraints_passed/next_action），缺失则 state_guard 阻断",
+            "第一轮强制 Plan：禁止第一轮调用任何 call_* 工具，必须先输出 plan"
+          ]
+        }
+      }
+    }
+  }
+}

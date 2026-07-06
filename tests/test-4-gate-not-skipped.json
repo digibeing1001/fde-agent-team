@@ -1,0 +1,58 @@
+{
+  "test_id": "T4-gate-not-skipped",
+  "test_name": "防跳协议是否生效（遇 Gate 必停）",
+  "pain_point": "痛点1+3: 不按预定流程执行 + 步骤跳跃（防跳协议失效）",
+  "priority": "P0",
+  "test_scenario": "模拟阶段切换场景，验证 FDE Lead 遇到 Gate 时是否程序化阻断并等用户确认",
+  "input": {
+    "user_message": "售前阶段已完成，准备进入调研阶段",
+    "context": {
+      "project_id": "TEST-202607-004",
+      "phase": "presales",
+      "completed_deliverables": ["售前简报", "Echo观察报告"],
+      "next_phase": "research"
+    }
+  },
+  "expected_behavior": {
+    "step_1_gate_detection": {
+      "requirement": "FDE Lead 检测到阶段切换触发 gate_phase",
+      "validation": "state_machine 进入 gate_phase 状态"
+    },
+    "step_2_programmatic_interrupt": {
+      "requirement": "程序化 interrupt_before 阻断，不是 prompt 模板",
+      "validation": "执行被暂停，等待 user_confirmation，非 LLM 自行决定是否停下"
+    },
+    "step_3_gate_json_output": {
+      "requirement": "输出 gate_protocol.json（非 emoji 文本模板）",
+      "validation": "输出是合法 JSON，包含 gate_name/current_step/next_step/waiting_for/produced_outputs/pass_conditions_met/key_questions_for_user 字段，waiting_for === 'user_confirmation'"
+    },
+    "step_4_no_skip_without_confirmation": {
+      "requirement": "未收到用户确认前，禁止输出下一步任何内容",
+      "validation": "gate JSON 输出后，下一个输出必须等待 user_confirmation。如果直接输出调研阶段内容，判定为跳过 gate 失败"
+    },
+    "step_5_resume_after_confirmation": {
+      "requirement": "收到用户确认后，进入下一阶段",
+      "validation": "user_confirmed=true 后，state_machine 从 gate_phase 转为 context（下一阶段的上下文收集）"
+    },
+    "step_6_quality_gate": {
+      "requirement": "交付物产出后触发 gate_quality，调用 QA Agent",
+      "validation": "act 阶段产出交付物后，state_machine 进入 gate_quality，调用 call_qa_agent"
+    },
+    "step_7_quality_gate_verdict": {
+      "requirement": "QA verdict=pass 才进下一步，verdict=rework 回到 act 重做",
+      "validation": "qa_verdict=pass → 进入 evaluate；qa_verdict=rework → 回到 act 并传 rework_list"
+    }
+  },
+  "validation_checks": [
+    {"check": "gate_phase 被触发", "pass_condition": "state_machine.current_state === 'gate_phase'"},
+    {"check": "程序化阻断（非 prompt 模板）", "pass_condition": "execution_paused === true && waiting_for === 'user_confirmation'"},
+    {"check": "输出 gate JSON（非 emoji 文本）", "pass_condition": "gate_output.startsWith('{') && JSON.parse(gate_output).waiting_for === 'user_confirmation'"},
+    {"check": "未确认前无下一步输出", "pass_condition": "gate_output 后无调研阶段内容，直到 user_confirmed"},
+    {"check": "确认后进入下一阶段", "pass_condition": "user_confirmed 后 state_machine 进入 context"},
+    {"check": "质量门触发 QA", "pass_condition": "交付物产出后调用 call_qa_agent"},
+    {"check": "QA verdict=pass 才进下一步", "pass_condition": "qa_verdict=pass → evaluate；qa_verdict=rework → act + rework_list"}
+  ],
+  "v2_0_failure_mode": "v2.0 防跳协议是 emoji + 方括号占位符的 prompt 模板（如 📍 当前: [阶段]），LLM 可不输出这个格式直接跳到下一步，无程序化约束阻止",
+  "v2_1_fix": "v2.1 state_machine.json 定义 gate_phase/gate_quality/gate_legal 节点，程序化 interrupt_before；强制输出 gate_protocol.json（非文本模板）；未输出 gate JSON 直接进入下一状态=任务失败",
+  "sources": ["LangGraph interrupt_before", "state_machine.json v2.1 gate_* 节点", "fde-lead SKILL v2.1 补丁7"]
+}

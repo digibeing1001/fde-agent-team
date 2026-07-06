@@ -1,0 +1,237 @@
+# FDE Agent Team - Output Enforcement 配置（v2.1 P2 修正）
+# 核算时间: 2026-07-06
+# 目的: 把 response_format 从 tools.schema.json 解耦，提供三层降级策略
+# 依据: R1 调研结论 - response_format: {type: "json_schema"} 是 OpenAI 特定功能，
+#        Anthropic/Coze/Dify/Hermes 支持程度不同，需要降级方案
+
+# =============================================================================
+# 强制输出的目标 schema（所有平台共用）
+# =============================================================================
+target_schema:
+  name: execution_plan
+  description: FDE Lead 首次输出必须是合法 JSON execution_plan
+  json_schema:
+    type: object
+    properties:
+      reframed_problem:
+        type: string
+        description: 重述真问题（PM-Clarity Clarify 结果）
+      user_constraints:
+        type: array
+        items: {type: string}
+        description: 用户附加约束，原样保留
+      current_phase:
+        type: string
+        enum: [presales, research, implementation, delivery, continuous]
+      current_gate:
+        type: string
+        description: 当前所在 Gate（防跳协议）
+      plan:
+        type: array
+        items:
+          type: object
+          properties:
+            step: {type: integer}
+            agent:
+              type: string
+              enum: [echo, delta, productize, research, knowledge-curator, qa, legal, coach]
+            task: {type: string}
+            depends_on:
+              type: array
+              items: {type: integer}
+            user_constraints_to_pass:
+              type: array
+              items: {type: string}
+            expected_outputs:
+              type: array
+              items: {type: string}
+            pass_conditions:
+              type: array
+              items: {type: string}
+          required: [step, agent, task, expected_outputs, pass_conditions]
+    required: [reframed_problem, user_constraints, plan]
+
+# =============================================================================
+# 三层降级策略
+# 各平台适配器按自身能力选择最高可用层级
+# =============================================================================
+tiers:
+
+  # Tier 1: 模型 API 原生支持（最强，完全可靠）
+  tier1_model_api:
+    description: 使用模型 API 原生的结构化输出能力
+    reliability: highest
+    platforms:
+      openai:
+        method: response_format
+        config:
+          response_format:
+            type: json_schema
+            json_schema:
+              name: execution_plan
+              schema: ${target_schema.json_schema}
+              strict: true
+      anthropic:
+        method: tool_use_with_prefill
+        config:
+          # Claude 不直接支持 response_format，用 tool_use + prefill 实现
+          # 定义一个强制调用的 tool，prefill 为 {"tool_use": "
+          tools:
+            - name: emit_execution_plan
+              description: 输出执行计划
+              input_schema: ${target_schema.json_schema}
+          prefill: '{"tool_use": "emit_execution_plan", "input": '
+          # 模型必须调用此 tool，prefill 强制结构化
+      google_gemini:
+        method: response_schema
+        config:
+          generation_config:
+            response_mime_type: application/json
+            response_schema: ${target_schema.json_schema}
+
+  # Tier 2: 框架层结构化输出（强，依赖框架支持）
+  tier2_framework:
+    description: 使用 Agent 框架的结构化输出封装
+    reliability: high
+    platforms:
+      langgraph:
+        method: with_structured_output
+        config:
+          # LangGraph 的 with_structured_output 内部自动选择模型 API 能力
+          # 优先用 Tier1，失败降级到 Tier2 内部解析
+          # 代码示例:
+          #   from langchain_core.output_parsers import JsonOutputParser
+          #   structured_llm = llm.with_structured_output(ExecutionPlan)
+          #   plan = structured_llm.invoke(input)
+          parser: JsonOutputParser
+          pydantic_model: ExecutionPlan
+          retry_on_parse_failure: true
+          max_retries: 2
+      dify:
+        method: llm_node_schema
+        config:
+          # Dify v1.13+ LLM 节点支持定义输出 schema
+          # workflow 编排时在 LLM 节点配置 output_schema
+          node_type: llm
+          output_schema: ${target_schema.json_schema}
+          output_variable: execution_plan
+          on_validation_error: retry  # 节点配置重试
+      microsoft_agent_framework:
+        method: checkpoint_with_schema
+        config:
+          # MAF 的 ChatContext + Checkpoint 支持结构化状态
+          output_type: ExecutionPlan
+          serializer: json
+
+  # Tier 3: prompt + parse + retry（兜底，所有平台都可用）
+  tier3_prompt_parse_retry:
+    description: 通过 prompt 指令 + 后处理解析 + 失败重试实现
+    reliability: medium  # 依赖 LLM 遵守指令，需要重试机制兜底
+    platforms:
+      coze:
+        method: prompt_with_fenced_block
+        config:
+          # Coze bot 输出是自然语言，需在 prompt 中强制要求 JSON
+          # 用 ```json ... ``` 围栏块便于解析
+          prompt_suffix: |
+            ---
+            [输出格式硬约束]
+            你的回复必须是一个合法 JSON，符合以下结构：
+            ```
+            {"reframed_problem": "...", "user_constraints": [...], "plan": [...]}
+            ```
+            禁止在 JSON 块外输出任何文字。违反 = 任务失败。
+          parser:
+            type: fenced_json
+            fence_pattern: '```json\n([\s\S]*?)\n```'
+            fallback: regex_json_object  # 退化到正则匹配 { ... }
+          retry:
+            max_retries: 2
+            on_failure: ask_user_for_clarification
+      hermes_openclaw:
+        method: prompt_with_json_instruction
+        config:
+          # Hermes/OpenClaw 是 prompt-only 平台，靠 prompt 指令 + 后处理
+          prompt_suffix: |
+            ---
+            [输出格式硬约束]
+            回复必须是合法 JSON execution_plan，结构见上。
+            不要输出任何说明文字、不要输出 markdown 标题、不要前后空行。
+            首字符必须是 {，末字符必须是 }。
+          parser:
+            type: strict_json
+            # 先尝试整体解析，失败则提取首个 {...} 块
+            strategy: [whole_parse, first_object_extract]
+          retry:
+            max_retries: 2
+            on_failure: log_and_alert
+      trae_claude_code:
+        method: skill_with_structured_expectation
+        config:
+          # Trae/Claude Code 系：skill 可以要求结构化输出
+          # 实际上 Claude API 已支持 tool_use (Tier1)，但 Trae 包装层可能屏蔽
+          # 兜底走 prompt + parse
+          prompt_suffix: |
+            输出 execution_plan JSON，结构见 config/tools.schema.json。
+          parser:
+            type: json_with_recovery
+            # json_with_recovery: 解析失败时尝试常见修复
+            # - 去除 markdown 围栏
+            # - 修复 trailing comma
+            # - 补全未闭合括号
+            recovery_strategies:
+              - strip_markdown_fence
+              - fix_trailing_comma
+              - close_unclosed_brackets
+          retry:
+            max_retries: 3
+
+# =============================================================================
+# 各平台选层规则
+# 适配器实现时按此规则选择最高可用层级
+# =============================================================================
+platform_tier_mapping:
+  langgraph: tier2_framework
+  dify: tier2_framework
+  microsoft_agent_framework: tier2_framework
+  coze: tier3_prompt_parse_retry
+  hermes_openclaw: tier3_prompt_parse_retry
+  trae_claude_code: tier3_prompt_parse_retry  # 若直接用 Claude API 可上探到 tier1
+  workbuddy: tier3_prompt_parse_retry
+  feishu: tier3_prompt_parse_retry
+
+  # OpenAI 直连和 Anthropic 直连属于 tier1
+  openai_direct: tier1_model_api
+  anthropic_direct: tier1_model_api
+  gemini_direct: tier1_model_api
+
+# =============================================================================
+# 验证与降级日志
+# =============================================================================
+validation:
+  # 解析后的 JSON 必须通过 schema 验证才算成功
+  schema_validator: jsonschema  # Python jsonschema 库 / ajv (Node)
+  on_schema_violation:
+    - log_violation
+    - retry_with_hint  # 把错误信息作为提示让 LLM 重写
+    - max_retries_exceeded: fallback_to_text  # 最终降级为自然语言，由 Lead 解析
+
+  # 降级事件必须记录（供 Coach Agent 审计）
+  logging:
+    events:
+      - tier_degradation  # 从 Tier1 降级到 Tier2/3
+      - parse_retry       # 解析失败重试
+      - schema_violation  # schema 验证失败
+    sink: StateStore  # 通过 StateStore.append() 写入项目事件流
+
+# =============================================================================
+# 关键断言自检（反幻觉）
+# =============================================================================
+assertion_self_check:
+  # 核查时间: 2026-07-06
+  # 断言1: OpenAI response_format 支持 json_schema - ✓ 已验证 (OpenAI 文档)
+  # 断言2: Anthropic 不支持 response_format，但支持 tool_use + prefill - ✓ 已验证 (Anthropic 文档)
+  # 断言3: LangGraph with_structured_output 内部自动选层 - ✓ 已验证 (LangGraph 文档)
+  # 断言4: Dify v1.13+ LLM 节点支持 output_schema - ⚠️ 单源（Dify 文档），需在适配器实现时确认
+  # 断言5: Coze bot 输出是自然语言 - ✓ 已验证 (Coze 文档)
+  # 断言6: Hermes/OpenClaw 是 prompt-only - ✓ 已验证 (项目定位)

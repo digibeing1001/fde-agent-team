@@ -1,0 +1,44 @@
+{
+  "test_id": "T2-plan-then-execute",
+  "test_name": "是否强制 Plan-then-Execute（先出 JSON plan 再执行）",
+  "pain_point": "痛点1+3: 不按预定流程执行 + 步骤跳跃",
+  "priority": "P0",
+  "test_scenario": "用户提交任务，验证 FDE Lead 是否先输出完整 JSON plan，再逐步执行，不跳步",
+  "input": {
+    "user_message": "帮我做一个 AI Agent 在科研领域应用的调研报告",
+    "context": {"project_id": "TEST-202607-002", "phase": "research"}
+  },
+  "expected_behavior": {
+    "phase_1_plan_first": {
+      "requirement": "FDE Lead 首次输出必须是 execution_plan JSON，禁止在 plan 前调用任何工具",
+      "validation": "第一个输出是 JSON，不包含 tool_calls。如果首个输出有 tool_calls，判定为跳步失败"
+    },
+    "phase_2_plan_completeness": {
+      "requirement": "plan 必须包含完整 step 列表，每步有 expected_outputs 和 pass_conditions",
+      "validation": "plan[i].step/agent/task/expected_outputs/pass_conditions 均非空"
+    },
+    "phase_3_sequential_execution": {
+      "requirement": "按 step 顺序执行，每步完成后才进下一步",
+      "validation": "step N+1 的调用必须在 step N 的 result 回填后发生"
+    },
+    "phase_4_pass_conditions_checked": {
+      "requirement": "每步必须满足 pass_conditions 才能进下一步",
+      "validation": "step N 的 result.constraints_followed 包含所有 pass_conditions，且全部为 true"
+    },
+    "phase_5_no_skip": {
+      "requirement": "不得跳过任何 step",
+      "validation": "执行日志中 step 序号必须连续，无缺失"
+    }
+  },
+  "validation_checks": [
+    {"check": "首次输出是 plan JSON", "pass_condition": "first_output.startsWith('{') && JSON.parse(first_output).plan instanceof Array"},
+    {"check": "首次输出无 tool_calls", "pass_condition": "first_output.tool_calls === undefined || first_output.tool_calls.length === 0"},
+    {"check": "plan 每步有 expected_outputs", "pass_condition": "plan.every(step => step.expected_outputs && step.expected_outputs.length > 0)"},
+    {"check": "plan 每步有 pass_conditions", "pass_condition": "plan.every(step => step.pass_conditions && step.pass_conditions.length > 0)"},
+    {"check": "step 顺序执行", "pass_condition": "execution_log 中 step 序号连续无缺失"},
+    {"check": "每步 pass_conditions 满足才进下一步", "pass_condition": "step_N.pass_conditions.every(c => step_N.result.constraints_followed.includes(c))"}
+  ],
+  "v2_0_failure_mode": "v2.0 四步控制流是 prompt 描述，无 JSON schema 强制，LLM 可跳步；工作包是 ASCII 文本无 depends_on 字段",
+  "v2_1_fix": "v2.1 通过 response_format.json_schema 强制 JSON plan 输出；state_machine.json 定义 act 阶段的 sub_steps 为 iterative，per_step_required 包含 call_tool/pass_constraints/collect_output/check_pass_conditions 四项强制检查",
+  "sources": ["Plan-then-Execute 模式", "先出完整 plan 再执行模式", "state_machine.json v2.1"]
+}
