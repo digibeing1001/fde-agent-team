@@ -315,9 +315,12 @@
 - [ ] 秘书 Skill 的 forbidden_tools 配置正确
 - [ ] v2.2 协议在 Skill 的 system prompt 中
 - [ ] automation 任务用于 Gate 等待
-- [ ] 用户知晓 WorkBuddy 是 prompt-only 保护（mechanical_enforcement_status: "not_configured"）
+- [ ] 用户知晓 WorkBuddy 无原生 DAG，但确认继续路径已接入 `resume_signal`
+- [ ] `adapters/workbuddy/workbuddy_adapter.py` 可把用户确认转换为 StateGuard 提交和 `workbuddy_next_payload`
 
-**⚠️ 重要警告**：WorkBuddy 平台上 v2.2 协议**无法机械强制**。如果 LLM 不遵守 prompt，秘书仍会代写。建议：
+**2026-07 运行时加固**：WorkBuddy 仍是单 Agent 宿主，无法提供 LangGraph/Coze 式原生 DAG；但“用户同意后继续执行”这条链路不再只依赖 prompt。`WorkBuddyResumeAdapter.confirm_and_resume(...)` 会把确认写入 StateGuard、生成 `fde-workbuddy-resume-signal`，并要求宿主直接执行 `next_action`。如果宿主收到 `workbuddy_next_payload.status == "ready"` 后仍输出“我准备如何执行”而不执行，即判定为运行时失败。
+
+**⚠️ 重要警告**：WorkBuddy 平台上 v2.2 协议仍**无法提供原生 DAG 级机械强制**。如果 LLM 不遵守 prompt，秘书仍可能代写。建议：
 - 短期：使用 v2.2 协议 + 用户手动监督
 - 中期：迁移到 Coze/LangGraph 获得机械强制
 - 长期：等待 WorkBuddy 支持 workflow DAG

@@ -1,5 +1,9 @@
 # FDE Agent Team
 
+## WorkBuddy 继续执行增强
+
+2026-07 更新：新增 `adapters/workbuddy/workbuddy_adapter.py`，把 WorkBuddy 中的“用户已同意继续”转换为 StateGuard 提交、`resume_signal` 和可执行 `workbuddy_next_payload`。当用户确认下一步后，宿主应直接执行 `next_action`，而不是让 Agent 再回答“准备如何执行”后停下。
+
 > 一支按 Palantir FDE（前置部署工程师）模式组织的 AI Agent 团队，卖结果不卖软件——你给目标，团队按流程交付。
 
 ---

@@ -53,7 +53,10 @@
     "workbuddy": {
       "enabled": false,
       "adapter_path": "adapters/workbuddy/",
-      "mode": "config"
+      "mode": "config",
+      "resume_adapter": "adapters/workbuddy/workbuddy_adapter.py",
+      "resume_signal": true,
+      "mechanical_resume_enforcement": "state_guard_committed"
     }
   },
 
