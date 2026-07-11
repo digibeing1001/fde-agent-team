@@ -127,12 +127,65 @@ class StateGuard:
             produced.append(artifact_name)
             self.state_store.set(project_id, "produced_artifacts", produced)
 
+    def record_usage(
+        self,
+        project_id: str,
+        *,
+        tokens: int = 0,
+        model_calls: int = 0,
+        tool_calls: int = 0,
+    ) -> dict:
+        """Record runtime usage for code-enforced loop budgets.
+
+        Adapters should call this after the provider returns authoritative token
+        usage and immediately before or after a tool dispatch. Missing provider
+        usage must be reported as unknown, never guessed by the model.
+        """
+        additions = {
+            "tokens": int(tokens),
+            "model_calls": int(model_calls),
+            "tool_calls": int(tool_calls),
+        }
+        if any(value < 0 for value in additions.values()):
+            raise ValueError("runtime usage increments must be non-negative")
+        increment = getattr(self.state_store, "increment_counters", None)
+        if callable(increment):
+            return increment(project_id, "runtime_usage", additions)
+        usage = dict(self.state_store.get(project_id, "runtime_usage") or {})
+        for key, value in additions.items():
+            usage[key] = int(usage.get(key, 0) or 0) + value
+        self.state_store.set(project_id, "runtime_usage", usage)
+        return usage
+
+    def _budget_violations(self, project_id: str) -> list[str]:
+        constraints = self.state_machine.get("global_constraints", {})
+        usage = self.state_store.get(project_id, "runtime_usage") or {}
+        violations = []
+        for usage_key, limit_key in (
+            ("tokens", "max_total_budget_tokens"),
+            ("model_calls", "max_model_calls"),
+            ("tool_calls", "max_tool_calls"),
+        ):
+            limit = int(constraints.get(limit_key, 0) or 0)
+            if limit > 0 and int(usage.get(usage_key, 0) or 0) > limit:
+                violations.append(f"{limit_key}_exhausted")
+        transition_counter = getattr(self.state_store, "transition_count", None)
+        if callable(transition_counter):
+            transition_count = int(transition_counter(project_id))
+        else:
+            transition_count = len(self.state_store.get(project_id, "transition_log") or [])
+        max_transitions = int(constraints.get("max_state_transitions", 0) or 0)
+        if max_transitions > 0 and transition_count >= max_transitions:
+            violations.append("max_state_transitions_exhausted")
+        return violations
+
     def validate_transition(
         self,
         project_id: str,
         target_state: str,
         produced_artifact: Optional[str] = None,
         user_confirmed: Optional[bool] = None,
+        _current_state: Optional[str] = None,
     ) -> bool:
         """
         验证状态转换是否合法。未通过抛 StateMachineError。
@@ -149,8 +202,18 @@ class StateGuard:
         Raises:
             StateMachineError: 如果转换非法
         """
-        current = self.get_current_state(project_id)
+        current = _current_state if _current_state is not None else self.get_current_state(project_id)
         current_state_def = self.state_machine["states"].get(current)
+
+        budget_violations = self._budget_violations(project_id)
+        budget_exit_states = set(self.terminal_states) | {"failed", "aborted"}
+        if budget_violations and target_state not in budget_exit_states:
+            raise StateMachineError(
+                "budget_exhausted",
+                current,
+                target_state,
+                ", ".join(budget_violations),
+            )
 
         if not current_state_def:
             raise StateMachineError(
@@ -179,9 +242,11 @@ class StateGuard:
                 f"{current} -> {target_state} 不在 transitions 中。合法目标: {[t['to'] for t in transitions]}",
             )
 
-        # 记录本次产出的 artifact
+        # 验证阶段必须是纯函数式的：失败转换不能把 artifact 偷渡进状态。
+        # 把本次产出加入候选集合，仅供当前验证使用；成功提交后才持久化。
+        available_artifacts = set(self.state_store.get(project_id, "produced_artifacts") or [])
         if produced_artifact:
-            self._record_artifact(project_id, produced_artifact)
+            available_artifacts.add(produced_artifact)
 
         # 如果从 gate_phase 转出，先检查 user_confirmed（优先级高于 artifact 检查）
         # 因为 user_confirmation.json 是用户确认后才产出的，本质上是同一回事
@@ -193,12 +258,12 @@ class StateGuard:
                     target_state,
                     "gate_phase 必须等用户确认 (user_confirmed=true) 才能转出，未确认前禁止进入下一步",
                 )
-            # 用户已确认，自动记录 user_confirmation.json artifact
-            self._record_artifact(project_id, "user_confirmation.json")
+            # 用户确认 artifact 也只在提交成功后持久化。
+            available_artifacts.add("user_confirmation.json")
 
         # 检查 artifact_required 是否已产出
         required_artifact = valid_transition.get("artifact_required")
-        if required_artifact and not self._check_artifact_exists(project_id, required_artifact):
+        if required_artifact and required_artifact not in available_artifacts:
             raise StateMachineError(
                 "missing_required_artifact",
                 current,
@@ -218,7 +283,7 @@ class StateGuard:
             # gate 状态需要进入时检查其 required_artifacts
             gate_required = target_state_def.get("required_artifacts", [])
             for artifact in gate_required:
-                if not self._check_artifact_exists(project_id, artifact):
+                if artifact not in available_artifacts:
                     violation_key = f"missing_{artifact.replace('.json', '')}"
                     action = on_invalid.get(violation_key, on_invalid.get("missing_gate_protocol", "block"))
                     raise StateMachineError(
@@ -241,6 +306,7 @@ class StateGuard:
         target_state: str,
         produced_artifact: Optional[str] = None,
         user_confirmed: Optional[bool] = None,
+        idempotency_key: Optional[str] = None,
     ) -> str:
         """
         验证并提交状态转换。验证失败抛异常，成功则更新状态。
@@ -248,8 +314,108 @@ class StateGuard:
         Returns:
             新状态名
         """
-        self.validate_transition(project_id, target_state, produced_artifact, user_confirmed)
-        self._set_current_state(project_id, target_state)
+        if idempotency_key:
+            find_committed = getattr(self.state_store, "get_transition_by_idempotency", None)
+            if callable(find_committed):
+                previous = find_committed(project_id, idempotency_key)
+                if previous:
+                    requested_artifacts = []
+                    if produced_artifact:
+                        requested_artifacts.append(produced_artifact)
+                    if (
+                        previous.get("from_state") == "gate_phase"
+                        and target_state != "aborted"
+                        and user_confirmed is True
+                        and "user_confirmation.json" not in requested_artifacts
+                    ):
+                        requested_artifacts.append("user_confirmation.json")
+                    if (
+                        previous.get("to_state") != target_state
+                        or list(previous.get("artifacts") or []) != requested_artifacts
+                    ):
+                        raise StateMachineError(
+                            "idempotency_conflict",
+                            str(previous.get("from_state", "unknown")),
+                            target_state,
+                            "同一个 idempotency_key 已用于不同目标状态或 artifact 集合",
+                        )
+                    return str(previous["to_state"])
+
+        current = self.get_current_state(project_id)
+        self.validate_transition(
+            project_id,
+            target_state,
+            produced_artifact,
+            user_confirmed,
+            _current_state=current,
+        )
+        committed_artifacts = []
+        if produced_artifact:
+            committed_artifacts.append(produced_artifact)
+        if current == "gate_phase" and target_state != "aborted" and user_confirmed is True:
+            committed_artifacts.append("user_confirmation.json")
+
+        durable_commit = getattr(self.state_store, "commit_state_transition", None)
+        if callable(durable_commit):
+            result = durable_commit(
+                project_id,
+                expected_state=current,
+                target_state=target_state,
+                artifacts=committed_artifacts,
+                idempotency_key=idempotency_key or "",
+            )
+            if result.get("status") == "conflict":
+                raise StateMachineError(
+                    "concurrent_transition",
+                    current,
+                    target_state,
+                    f"状态已被其他 worker 更新为 {result.get('current_state')}",
+                )
+            if result.get("status") == "idempotency_conflict":
+                raise StateMachineError(
+                    "idempotency_conflict",
+                    current,
+                    target_state,
+                    "同一个 idempotency_key 已用于不同的状态转换",
+                )
+            if result.get("status") not in {"committed", "idempotent"}:
+                raise StateMachineError(
+                    "transition_commit_failed",
+                    current,
+                    target_state,
+                    str(result),
+                )
+            return target_state
+
+        compare_and_set = getattr(self.state_store, "compare_and_set", None)
+        if callable(compare_and_set):
+            if not compare_and_set(project_id, "current_state", current, target_state):
+                raise StateMachineError(
+                    "concurrent_transition",
+                    current,
+                    target_state,
+                    "状态在验证和提交之间发生变化",
+                )
+        else:
+            if self.get_current_state(project_id) != current:
+                raise StateMachineError(
+                    "concurrent_transition",
+                    current,
+                    target_state,
+                    "状态在验证和提交之间发生变化",
+                )
+            self._set_current_state(project_id, target_state)
+        for artifact in committed_artifacts:
+            self._record_artifact(project_id, artifact)
+        transition_log = self.state_store.get(project_id, "transition_log") or []
+        transition_log.append({
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "from_state": current,
+            "to_state": target_state,
+            "artifacts": committed_artifacts,
+            "idempotency_key": idempotency_key or "",
+        })
+        self.state_store.set(project_id, "transition_log", transition_log)
         return target_state
 
     def wrap_llm_call(self, llm_invoke_fn: Callable, project_id: str, max_missing_tag_retries: int = 2):
@@ -276,6 +442,15 @@ class StateGuard:
         """
 
         def wrapped(messages: list) -> str:
+            self.record_usage(project_id, model_calls=1)
+            budget_violations = self._budget_violations(project_id)
+            if budget_violations:
+                raise StateMachineError(
+                    "budget_exhausted",
+                    self.get_current_state(project_id),
+                    self.get_current_state(project_id),
+                    ", ".join(budget_violations),
+                )
             response = llm_invoke_fn(messages)
 
             # 检查是否有状态转换标签（即使格式错误也算有声明意图）

@@ -35,6 +35,7 @@ class WorkBuddyResumeAdapter:
         next_state: str = "context",
         dispatch: dict[str, Any] | None = None,
         reason: str = "",
+        idempotency_key: str = "",
     ) -> dict[str, Any]:
         """Commit the gate confirmation and write a resume signal.
 
@@ -46,6 +47,7 @@ class WorkBuddyResumeAdapter:
             dispatch: Optional worker dispatch payload, e.g.
                 {"agent": "research", "task": "..."}.
             reason: Human-readable confirmation reason.
+            idempotency_key: Stable host event id used to deduplicate retries.
 
         Returns:
             A structured resume signal persisted under ``resume_signal``.
@@ -68,6 +70,7 @@ class WorkBuddyResumeAdapter:
                     "aborted",
                     produced_artifact="abort_reason.json",
                     user_confirmed=False,
+                    idempotency_key=idempotency_key or None,
                 )
             except StateMachineError as exc:
                 signal = self._blocked_signal(
@@ -90,6 +93,7 @@ class WorkBuddyResumeAdapter:
                 "to_state": new_state,
                 "requires_dispatch": False,
                 "next_action": {"type": "stop", "reason": reason or "user rejected"},
+                "idempotency_key": idempotency_key,
                 "mechanical_enforcement_status": "state_guard_committed",
             }
             self.state_store.set(project_id, "resume_signal", signal)
@@ -100,6 +104,7 @@ class WorkBuddyResumeAdapter:
             next_state,
             produced_artifact="user_confirmation.json",
             user_confirmed=True,
+            idempotency_key=idempotency_key or None,
         )
         next_action = self._next_action(new_state, dispatch)
         signal = {
@@ -116,6 +121,7 @@ class WorkBuddyResumeAdapter:
             "next_action": next_action,
             "forbidden_reply": "Do not answer with a plan or preparation note; execute next_action.",
             "reason": reason,
+            "idempotency_key": idempotency_key,
             "mechanical_enforcement_status": "state_guard_committed",
         }
         self.state_store.set(project_id, "resume_signal", signal)

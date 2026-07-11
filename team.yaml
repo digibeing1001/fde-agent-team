@@ -240,8 +240,28 @@ platform_abstractions:
     coze_impl: "Coze 消息节点"
   state_store:
     interface: "get(project_id, key), set(project_id, key, value)"
+    local_durable_impl: "adapters/durable_state_store.py::AtomicJsonStateStore"
+    production_contract: "atomic compare-and-set + transactional state/artifact/idempotency/event commit"
     feishu_impl: "飞书文档作为 KV"
     langgraph_impl: "StateGraph state"
+
+# ============ 耐久运行时契约 ============
+durable_runtime:
+  version: "1.0.0"
+  solo_first: true
+  transition_executor: "StateGuard + StateStore.commit_state_transition"
+  validation_is_pure: true
+  event_schema: "fde-state-transition-event@1.0.0"
+  event_fields: [event_id, sequence, correlation_id, causation_id, idempotency_key, previous_event_hash, event_hash]
+  budgets:
+    source: "state_machine.global_constraints"
+    counters: [tokens, model_calls, tool_calls, state_transitions]
+    enforcement: "adapter_code_layer"
+  distributed_host_requirements:
+    - "transactional compare-and-set"
+    - "durable worker lease and crash recovery"
+    - "tool-level idempotency for external side effects"
+    - "schema migration and replay compatibility"
 
 # ============ 保留的好设计 (v2.0) ============
 preserved_designs:
