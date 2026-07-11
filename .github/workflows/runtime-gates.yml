@@ -1,0 +1,53 @@
+name: Runtime Gates
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile runtime
+        run: |
+          python -m py_compile \
+            adapters/base.py \
+            adapters/state_guard.py \
+            adapters/tier3_enforcer.py \
+            adapters/durable_state_store.py \
+            adapters/workbuddy/workbuddy_adapter.py
+      - name: Validate JSON contracts
+        run: |
+          python -m json.tool config/tools.schema.json >/dev/null
+          python -m json.tool docs/work-package-schema.json >/dev/null
+          python -m json.tool agents/fde-lead/skills/fde-loop-control/state_machine.json >/dev/null
+      - name: Run deterministic runtime suites
+        run: |
+          python tests/r2_reflection_test.py
+          python tests/r2_e2e_simulation_test.py
+          python tests/p6_state_tag_test.py
+          python tests/p7_tier3_test.py
+          python tests/p8_workbuddy_resume_test.py
+          python tests/p9_durable_state_test.py
+      - name: Check patch hygiene
+        run: git diff --check

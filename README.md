@@ -1,5 +1,18 @@
 # FDE Agent Team
 
+## 2026-07 耐久 Loop 运行时增强
+
+本版补上了长期 loop 真正需要的执行语义，而不只是在 prompt 里声明“可恢复”：
+
+- `AtomicJsonStateStore`：跨进程文件锁、CAS、原子替换与重启恢复；
+- 状态 + artifact + idempotency + transition event 在同一事务提交；
+- 失败迁移不再污染 artifact 状态；
+- transition event 带 sequence/correlation/causation 和可验证哈希链；
+- token/model/tool/transition 硬预算在代码层阻断继续消耗；
+- GitHub Actions 在 Python 3.11/3.12 执行 6 组确定性测试。
+
+生产用法和单机/分布式边界见 [FDE 耐久运行时](docs/durable-runtime.zh-CN.md)，论文依据与取舍见 [多 Agent 与长期 Loop：研究基础](docs/research-foundations-2026-07.zh-CN.md)。
+
 ## WorkBuddy 继续执行增强
 
 2026-07 更新：新增 `adapters/workbuddy/workbuddy_adapter.py`，把 WorkBuddy 中的“用户已同意继续”转换为 StateGuard 提交、`resume_signal` 和可执行 `workbuddy_next_payload`。当用户确认下一步后，宿主应直接执行 `next_action`，而不是让 Agent 再回答“准备如何执行”后停下。
@@ -101,6 +114,14 @@ team.yaml 是单一真相源，各平台适配器负责翻译：
 - B 类平台（Coze / 飞书 Bot / 腾讯元器）：适配器翻译为平台特定格式
 - C 类平台（Hermes / OpenClaw / Trae / WorkBuddy）：适配器用 v2.2 协议在 prompt 层最佳努力执行
 
+### 5. 耐久状态——崩溃恢复、并发安全、可重放
+
+- 本地运行时以项目级原子 snapshot 保存状态，进程重启后可以继续读取；
+- 同一宿主事件用 `idempotency_key` 去重，重复投递不会重复迁移；
+- 并发 worker 用 compare-and-set 阻止过期状态覆盖；
+- 哈希链 transition log 可以验证事件有没有被改写或乱序；
+- 单机 JSON store 不冒充分布式数据库，集群部署必须替换成等价事务后端。
+
 ---
 
 ## 特点是什么
@@ -113,6 +134,8 @@ team.yaml 是单一真相源，各平台适配器负责翻译：
 - **有四步干活法**：context → decide → act → evaluate，不会无限循环
 - **平台无关**：一套定义适配多个平台，不绑死某个工具
 - **可观测**：全链路 trace，每步谁干的、花了多少、有没有失败，查得到
+- **可恢复**：状态迁移、artifact、幂等索引和证据事件原子提交，失败不留半成品状态
+- **有预算**：model/tool/token/transition 硬上限由代码检查，防止讨论或反思无限循环
 
 ---
 
@@ -164,6 +187,7 @@ fde-agent-team/
 │   └── coach-agent/SKILL.md           # 评估复盘
 ├── adapters/                          # 平台适配器
 │   ├── base.py                        # 适配器基类
+│   ├── durable_state_store.py         # 原子状态、CAS、幂等与哈希链事件
 │   ├── tier3_enforcer.py              # C 类平台 v2.2 协议强制器
 │   └── state_guard.py                 # 状态机守卫
 ├── config/                            # 配置
@@ -171,8 +195,10 @@ fde-agent-team/
 │   └── output_enforcement.yaml        # 输出强制策略
 ├── docs/                              # 文档
 │   ├── platform-adapter-spec.md       # 平台适配器接口规范
+│   ├── durable-runtime.zh-CN.md        # 耐久运行时使用与边界
+│   ├── research-foundations-2026-07.zh-CN.md # 论文和开源实践依据
 │   └── cross-platform-deployment-guide.md  # 跨平台部署指南
-└── tests/                             # 测试（159 项全部通过）
+└── tests/                             # 6 组确定性测试（168 项全部通过）
 ```
 
 ---
@@ -182,6 +208,8 @@ fde-agent-team/
 - [team.yaml](team.yaml) —— 平台无关单一真相源，团队定义的权威文件
 - [docs/platform-adapter-spec.md](docs/platform-adapter-spec.md) —— 平台适配器接口规范
 - [docs/cross-platform-deployment-guide.md](docs/cross-platform-deployment-guide.md) —— 跨平台部署指南（A/B/C 类平台）
+- [docs/durable-runtime.zh-CN.md](docs/durable-runtime.zh-CN.md) —— 原子状态、幂等、预算和事件回放
+- [docs/research-foundations-2026-07.zh-CN.md](docs/research-foundations-2026-07.zh-CN.md) —— 多 Agent/长期 loop 的论文依据和工程取舍
 - [config/tools.schema.json](config/tools.schema.json) —— 工具白名单配置
 - `agents/fde-lead/skills/fde-loop-control/state_machine.json` —— 状态机定义
 
@@ -191,4 +219,5 @@ fde-agent-team/
 
 - 所有自写的角色文档和技能文件为原创
 - 方法论仅作设计参考，未复制代码
+- 当前仓库尚未包含 `LICENSE`；在所有者明确选择许可证前，默认不授予第三方复制、修改或再分发权，请勿把“公开可见”误认为“已开源授权”
 - Legal Agent 输出审查草稿，**不替代执业律师**，最终外发仍需人类律师把关
