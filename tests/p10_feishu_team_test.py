@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 from adapters.durable_state_store import AtomicJsonStateStore
 from adapters.feishu.feishu_adapter import FeishuMessageBus
 from adapters.feishu.team_gateway import (
-    GatewayError, build_handoff, invite_batch_sizes, provision_plan, route_event,
+    GatewayError, build_handoff, inventory_environment, invite_batch_sizes, provision_plan, route_event,
     staffing_proposal, validate_manifest,
 )
 
@@ -57,6 +57,19 @@ def test_manifest_and_seven_bot_provision_uses_five_plus_two_batches():
         raise AssertionError("unconfirmed staffing must fail closed")
     except GatewayError:
         pass
+
+
+def test_inventory_keeps_same_role_names_isolated_by_team():
+    env = env_for(MANIFEST)
+    inventory = {"version": "2.0.0", "bots": {
+        f"{MANIFEST['team_id']}/{agent['agent_id']}": {
+            "team_id": MANIFEST["team_id"], "agent_id": agent["agent_id"],
+            "app_id": env[agent["app_id_env"]], "open_id": env[agent["open_id_env"]],
+        } for agent in MANIFEST["agents"]
+    }}
+    expected = {key: value for key, value in env.items() if key != MANIFEST["chat_id_env"]}
+    assert inventory_environment(MANIFEST, inventory, {}) == expected
+    assert inventory_environment(dict(MANIFEST, team_id="another-team"), inventory, {}) == {}
 
 
 def test_human_entry_bot_handoff_dedup_and_loop_guard():
@@ -105,6 +118,7 @@ HANDOFF_MARKER = "[FDE_HANDOFF_V1]"
 
 if __name__ == "__main__":
     test_manifest_and_seven_bot_provision_uses_five_plus_two_batches()
+    test_inventory_keeps_same_role_names_isolated_by_team()
     test_human_entry_bot_handoff_dedup_and_loop_guard()
     test_message_bus_uses_current_cli_shortcuts()
     print("p10 feishu team tests: PASS")

@@ -58,6 +58,37 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
                 raise GatewayError(f"agent {agent.get('agent_id')} missing {key}")
 
 
+def inventory_environment(
+    manifest: Mapping[str, Any], inventory: Mapping[str, Any] | None,
+    base: Mapping[str, str] = os.environ,
+) -> dict[str, str]:
+    """Merge reusable non-secret Bot IDs using the stable team_id/agent_id key."""
+    result = dict(base)
+    if not inventory:
+        return result
+    if inventory.get("version") == "2.0.0":
+        records = inventory.get("bots", {})
+        if not isinstance(records, Mapping):
+            raise GatewayError("bot inventory bots must be an object")
+        key_for = lambda agent_id: f"{manifest['team_id']}/{agent_id}"
+    else:
+        if inventory.get("team_id") and inventory.get("team_id") != manifest["team_id"]:
+            return result
+        records = inventory.get("agents", {})
+        if not isinstance(records, Mapping):
+            raise GatewayError("bot inventory agents must be an object")
+        key_for = lambda agent_id: agent_id
+    for agent in _agents(manifest):
+        record = records.get(key_for(agent["agent_id"]), {})
+        if not isinstance(record, Mapping):
+            continue
+        if record.get("app_id"):
+            result.setdefault(agent["app_id_env"], str(record["app_id"]))
+        if record.get("open_id"):
+            result.setdefault(agent["open_id_env"], str(record["open_id"]))
+    return result
+
+
 def staffing_proposal(
     manifest: Mapping[str, Any], *, objective: str, specialists: list[str],
 ) -> dict[str, Any]:

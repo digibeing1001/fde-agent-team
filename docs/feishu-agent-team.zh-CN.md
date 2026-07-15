@@ -19,9 +19,20 @@
    node scripts/feishu-team-bootstrap.mjs --manifest config/feishu-team.example.json --confirm-create
    ```
 
-   重复传 `--only research-agent` 可只创建指定 Agent；中断后重跑会跳过 inventory 中已完成的 Agent。
+   可重复传 `--manifest` 一次导入多个团队。跨团队 Bot 使用 `team_id/agent_id` 作为稳定身份，同名角色不会误合并。重复传 `--only research-agent` 会选择所有团队的同名角色，也可传 `--only fde-team/research-agent` 精确选择；中断后重跑会跳过 inventory 中已完成的 Bot。
+
+   若先建立一个安装引导 Agent，可把授权链接和进度直接发到飞书对话：
+
+   ```bash
+   node scripts/feishu-team-bootstrap.mjs \
+     --manifest config/feishu-team.example.json \
+     --notify-profile fde-installer --notify-chat-id oc_xxx \
+     --confirm-create
+   ```
+
+   每个独立 Bot 应用首次创建都要分别完成一次在线确认；完成后即可反复加入后续项目群，无需重复确认。`lark-cli auth login` 只在角色确需访问个人日历、云盘等用户数据时使用，不是纯 Bot 建群与消息能力的前置条件。全量预装与“秘书首次接单后只导入缺失角色”共用同一 inventory。
 2. 复制 `config/feishu-team.example.json`，为项目设置唯一 `project_id`、群名和环境变量名。
-3. 每个 Agent Bot 使用独立 lark-cli profile；App ID、Bot Open ID 和群 ID 只放环境变量，不提交密钥或真实标识。
+3. 每个 Agent Bot 使用独立 lark-cli profile；运行时可用 `inventory_environment()` 从 inventory 载入非秘密 App ID/Open ID。群 ID 仍按项目隔离，任何 App Secret 都不进入 inventory、聊天或 Git。
 4. `fde-lead` 调用 `staffing_proposal()` 形成包含任务目标、核心角色、按需专家和确认令牌的方案。用户确认完全相同的方案后，才把令牌传给 `provision_plan()`。
 5. `provision_plan()` 只为已确认成员生成参数数组，且不执行。人工审阅后执行首条建群命令，得到 `chat_id` 写入 `FDE_FEISHU_CHAT_ID`，再执行其余分批拉 Bot 命令。
 6. 每个 Bot 分别运行 `lark-cli --profile <profile> event consume im.message.receive_v1 --as bot`，将每行 NDJSON 交给 `route_event()`。
