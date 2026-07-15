@@ -11,7 +11,8 @@ sys.path.insert(0, str(ROOT))
 from adapters.durable_state_store import AtomicJsonStateStore
 from adapters.feishu.feishu_adapter import FeishuMessageBus
 from adapters.feishu.team_gateway import (
-    GatewayError, build_handoff, provision_plan, route_event, staffing_proposal, validate_manifest,
+    GatewayError, build_handoff, invite_batch_sizes, provision_plan, route_event,
+    staffing_proposal, validate_manifest,
 )
 
 
@@ -26,21 +27,31 @@ def env_for(manifest):
     return env
 
 
-def test_manifest_and_three_batch_provision():
+def test_manifest_and_seven_bot_provision_uses_five_plus_two_batches():
     validate_manifest(MANIFEST)
     proposal = staffing_proposal(
-        MANIFEST, objective="Clarify, research, and validate", specialists=["echo-agent", "research-agent", "qa-agent"]
+        MANIFEST,
+        objective="Run a seven-bot FDE project team",
+        specialists=[
+            "echo-agent", "delta-agent", "productize-agent", "research-agent",
+            "knowledge-curator", "qa-agent",
+        ],
     )
     assert proposal["core_agents"] == ["fde-lead"]
-    assert len(proposal["selected_agents"]) == 4
+    assert len(proposal["selected_agents"]) == 7
+    assert invite_batch_sizes(len(proposal["selected_agents"])) == [5, 2]
     commands = provision_plan(
         MANIFEST, env_for(MANIFEST), proposal=proposal,
         confirmation_token=proposal["confirmation_token"],
     )
-    assert len(commands) == 1
+    assert len(commands) == 2
     assert commands[0][3:5] == ["im", "+chat-create"]
     assert "--dry-run" not in commands[0]  # plan is argv only and never executes
-    assert commands[0][commands[0].index("--bots") + 1] == "cli_0,cli_1,cli_4,cli_6"
+    first_batch = commands[0][commands[0].index("--bots") + 1].split(",")
+    second_batch = json.loads(commands[1][commands[1].index("--data") + 1])["id_list"]
+    assert len(first_batch) == 5
+    assert len(second_batch) == 2
+    assert first_batch + second_batch == ["cli_0", "cli_1", "cli_2", "cli_3", "cli_4", "cli_5", "cli_6"]
     try:
         provision_plan(MANIFEST, env_for(MANIFEST), proposal=proposal, confirmation_token="wrong")
         raise AssertionError("unconfirmed staffing must fail closed")
@@ -93,7 +104,7 @@ def test_message_bus_uses_current_cli_shortcuts():
 HANDOFF_MARKER = "[FDE_HANDOFF_V1]"
 
 if __name__ == "__main__":
-    test_manifest_and_three_batch_provision()
+    test_manifest_and_seven_bot_provision_uses_five_plus_two_batches()
     test_human_entry_bot_handoff_dedup_and_loop_guard()
     test_message_bus_uses_current_cli_shortcuts()
     print("p10 feishu team tests: PASS")

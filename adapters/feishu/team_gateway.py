@@ -18,6 +18,16 @@ class GatewayError(ValueError):
     """Manifest or handoff violates the gateway contract."""
 
 
+def invite_batch_sizes(bot_count: int) -> list[int]:
+    """Split the actual confirmed roster by Feishu's per-request ceiling."""
+    if bot_count < 1 or bot_count > MAX_BOTS_PER_CHAT:
+        raise GatewayError("confirmed bot count must be between 1 and 15")
+    return [
+        min(MAX_BOTS_PER_INVITE, bot_count - start)
+        for start in range(0, bot_count, MAX_BOTS_PER_INVITE)
+    ]
+
+
 @dataclass(frozen=True)
 class RouteDecision:
     accepted: bool
