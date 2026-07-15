@@ -28,17 +28,26 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Compile runtime
         run: |
+          node --check scripts/feishu-team-bootstrap.mjs
           python -m py_compile \
             adapters/base.py \
             adapters/state_guard.py \
             adapters/tier3_enforcer.py \
             adapters/durable_state_store.py \
+            adapters/feishu/feishu_adapter.py \
+            adapters/feishu/team_gateway.py \
             adapters/workbuddy/workbuddy_adapter.py
       - name: Validate JSON contracts
         run: |
           python -m json.tool config/tools.schema.json >/dev/null
+          python -m json.tool config/feishu-team.schema.json >/dev/null
+          python -m json.tool config/feishu-team.example.json >/dev/null
           python -m json.tool docs/work-package-schema.json >/dev/null
           python -m json.tool agents/fde-lead/skills/fde-loop-control/state_machine.json >/dev/null
       - name: Run deterministic runtime suites
@@ -49,5 +58,6 @@ jobs:
           python tests/p7_tier3_test.py
           python tests/p8_workbuddy_resume_test.py
           python tests/p9_durable_state_test.py
+          python tests/p10_feishu_team_test.py
       - name: Check patch hygiene
         run: git diff --check

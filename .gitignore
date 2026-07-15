@@ -13,3 +13,5 @@ env/
 .DS_Store
 Thumbs.db
 *.log
+.fde-local/
+feishu-bootstrap/node_modules/

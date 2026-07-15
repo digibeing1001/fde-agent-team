@@ -1,0 +1,27 @@
+{
+  "$schema": "./feishu-team.schema.json",
+  "schema_version": "1.0",
+  "team_id": "fde-team",
+  "project_id": "replace-with-project-id",
+  "chat_name": "FDE 团队｜replace-with-project-id",
+  "description": "一个项目一个群，由 FDE Lead 受控调度专家 Bot",
+  "chat_id_env": "FDE_FEISHU_CHAT_ID",
+  "secretary_agent_id": "fde-lead",
+  "policy": {
+    "max_hops": 6,
+    "human_entry": "secretary_only",
+    "bot_messages": "explicit_mention_and_typed_handoff",
+    "staffing": "fde_lead_proposes_specialists_then_human_confirms"
+  },
+  "agents": [
+    {"agent_id": "fde-lead", "display_name": "FDE Lead", "profile": "fde-lead", "app_id_env": "FDE_LEAD_APP_ID", "open_id_env": "FDE_LEAD_OPEN_ID"},
+    {"agent_id": "echo-agent", "display_name": "FDE Echo", "profile": "fde-echo", "app_id_env": "FDE_ECHO_APP_ID", "open_id_env": "FDE_ECHO_OPEN_ID"},
+    {"agent_id": "delta-agent", "display_name": "FDE Delta", "profile": "fde-delta", "app_id_env": "FDE_DELTA_APP_ID", "open_id_env": "FDE_DELTA_OPEN_ID"},
+    {"agent_id": "productize-agent", "display_name": "FDE Productize", "profile": "fde-productize", "app_id_env": "FDE_PRODUCTIZE_APP_ID", "open_id_env": "FDE_PRODUCTIZE_OPEN_ID"},
+    {"agent_id": "research-agent", "display_name": "FDE Research", "profile": "fde-research", "app_id_env": "FDE_RESEARCH_APP_ID", "open_id_env": "FDE_RESEARCH_OPEN_ID"},
+    {"agent_id": "knowledge-curator", "display_name": "FDE Knowledge Curator", "profile": "fde-knowledge", "app_id_env": "FDE_KNOWLEDGE_APP_ID", "open_id_env": "FDE_KNOWLEDGE_OPEN_ID"},
+    {"agent_id": "qa-agent", "display_name": "FDE QA", "profile": "fde-qa", "app_id_env": "FDE_QA_APP_ID", "open_id_env": "FDE_QA_OPEN_ID"},
+    {"agent_id": "legal-agent", "display_name": "FDE Legal", "profile": "fde-legal", "app_id_env": "FDE_LEGAL_APP_ID", "open_id_env": "FDE_LEGAL_OPEN_ID"},
+    {"agent_id": "coach-agent", "display_name": "FDE Coach", "profile": "fde-coach", "app_id_env": "FDE_COACH_APP_ID", "open_id_env": "FDE_COACH_OPEN_ID"}
+  ]
+}

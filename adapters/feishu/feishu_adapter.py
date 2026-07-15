@@ -23,11 +23,12 @@ FDE Agent Team - 飞书适配器（v2.1 P5 实现）
   state = FeishuStateStore(state_doc_token=...)
 """
 
+import hashlib
 import json
 import subprocess
 import tempfile
 import os
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from adapters.base import FileStorage, MessageBus, StateStore
 
@@ -137,25 +138,42 @@ class FeishuStorage(FileStorage):
 class FeishuMessageBus(MessageBus):
     """飞书即时通讯消息总线"""
 
-    def __init__(self, chat_id: Optional[str] = None):
+    def __init__(
+        self,
+        chat_id: Optional[str] = None,
+        *,
+        profile: Optional[str] = None,
+        runner: Callable[[list, Optional[str]], str] = _run_lark_cli,
+    ):
         """
         Args:
             chat_id: 默认群聊 ID（从 config/platform.json 读取）
         """
         self.chat_id = chat_id
+        self.profile = profile
+        self._runner = runner
+
+    def _run(self, args: list, input_data: Optional[str] = None) -> str:
+        prefix = ["--profile", self.profile] if self.profile else []
+        return self._runner(prefix + args, input_data)
 
     async def send(self, target: str, message: str, msg_type: str = "notification") -> None:
-        # target 可以是 chat_id 或 open_id
-        # lark-cli im send --chat <chat_id> --text <message>
-        # 对于长消息用 stdin 传入
-        _run_lark_cli(["im", "send", "--chat", target, "--stdin"], input_data=message)
+        # 使用 CLI 1.0.69+ 的稳定 shortcut。幂等键避免事件重投导致重复发送。
+        digest = hashlib.sha256(f"{target}\0{message}".encode("utf-8")).hexdigest()[:40]
+        self._run([
+            "im", "+messages-send", "--chat-id", target,
+            "--text", message, "--idempotency-key", digest, "--as", "bot",
+        ])
 
     async def poll(self, filter_dict: Optional[dict] = None) -> list:
-        # lark-cli im list --chat <chat_id> --limit 50
+        # 历史补偿读取；实时接收应使用 `lark-cli event consume im.message.receive_v1`。
         chat = (filter_dict or {}).get("to", self.chat_id)
         if not chat:
             return []
-        out = _run_lark_cli(["im", "list", "--chat", chat, "--limit", "50"])
+        out = self._run([
+            "im", "+chat-messages-list", "--chat-id", chat,
+            "--page-size", "50", "--order", "desc", "--no-reactions", "--as", "bot",
+        ])
         try:
             data = json.loads(out)
             return data if isinstance(data, list) else data.get("messages", [])
@@ -163,8 +181,9 @@ class FeishuMessageBus(MessageBus):
             return []
 
     async def ack(self, message_id: str) -> None:
-        # 飞书 IM 没有显式 ack 机制，这里用 read 标记替代
-        _run_lark_cli(["im", "read", "--message-id", message_id])
+        # 飞书事件没有消费 ack API。处理确认由 team_gateway 基于 message_id
+        # 写入本地 AtomicJsonStateStore，不能调用不存在的 "im read" 命令。
+        return None
 
 
 class FeishuStateStore(StateStore):
@@ -264,7 +283,10 @@ class FeishuAdapter:
         """
         feishu_cfg = platform_config.get("feishu", {})
         self.storage = FeishuStorage(folder_token=feishu_cfg.get("folder_token"))
-        self.message_bus = FeishuMessageBus(chat_id=feishu_cfg.get("chat_id"))
+        self.message_bus = FeishuMessageBus(
+            chat_id=feishu_cfg.get("chat_id"),
+            profile=feishu_cfg.get("profile"),
+        )
         self.state_store = FeishuStateStore(state_doc_token=feishu_cfg.get("state_doc_token"))
 
     def call_worker_agent(
