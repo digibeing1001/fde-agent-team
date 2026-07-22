@@ -23,7 +23,7 @@
 
 让专家包成为「头像数据单一真相源」，宿主一旦修复即可直接生效：
 
-- `team.yaml`：为 `secretary` + 8 个 `agents.*` 增加 `avatar: avatars/<id>.png`。
+- `team.yaml`：为 `secretary` + 8 个 `agents.*` 增加 `avatar: avatars/<id>.png`；顶层新增 `avatar: avatars/team.png`（团队卡片头像真相源）。
 - `agents/*/SKILL.md`：frontmatter 增加 `avatar: avatars/<id>.png`（与 `plugin.json` 生成格式一致）。
 - `avatars/`：提交 9 张头像 PNG（含领队）+ `team.png`。
 - `adapters/workbuddy/avatar_resolver.py`：提供 `resolve_avatar(agent_id)`，输入 team.yaml key
@@ -31,25 +31,65 @@
 
 ## 3. 宿主侧修复（WB-HARNESS-P0-001 治本项，需 WorkBuddy 团队执行）
 
-专家包仓库无法修改宿主运行时。宿主需做的最小改动：
+专家包仓库无法修改宿主运行时。宿主需做的最小改动 = **在注册 spawned teammate 时，把 `avatar` 一并写进展示元数据**。
 
-> 在注册 spawned teammate（Agent 工具 / TeamCreate spawn）时，依据 `subagent_type`
-> （或 `agentId`）调用包内 `resolve_avatar()`，将返回的路径写入该 teammate 的展示元数据
-> （团队 `config.json` 的 `members[].avatar`，以及 UI 头像字段）。
+### 3.1 接入点
+宿主在 `Agent` 工具 / `TeamCreate` spawn 成功、把子代理写入团队 `config.json` 的 `members[]` 处，是唯一的修复点。当前逻辑写入了 `agentId/name/role/agentType/color/backendType/cwd/subscriptions`，唯独漏了 `avatar`。
 
-伪代码：
+### 3.2 宿主侧最小补丁（TypeScript 示意）
+宿主已有专家包的 `plugin.json` 与 `agents/<id>.md` 定义，按 `subagent_type` 查表即可拿到 avatar：
 
-```python
-avatar_path = resolve_avatar(subagent_type)          # 或 plugin 包内等价解析
-team_config.members.append({
-    "agentId": ..., "name": ..., "agentType": subagent_type,
-    "avatar": avatar_path,                            # ← 新增：从包定义继承
-    ...
-})
+```typescript
+// harness: when registering a spawned teammate
+interface TeammateRecord {
+  agentId: string;
+  name: string;
+  role: string;
+  agentType: string;
+  color: string;
+  backendType: string;
+  cwd: string;
+  subscriptions: string[];
+  avatar?: string | null; // ← WB-HARNESS-P0-001: 新增
+}
+
+function resolveAvatar(subagentType: string): string | null {
+  // 1) 优先查 plugin.json members[]（与顶层专家同一数据源）
+  const member = plugin.members.find((m) => m.id === subagentType);
+  if (member?.avatar) return member.avatar;
+  // 2) 兜底：查 agents/<id>.md frontmatter 的 avatar 字段
+  const md = agentMarkdowns.get(subagentType);
+  if (md?.avatar) return md.avatar;
+  return null; // 未声明时显式返回 null，不抛错（容错）
+}
+
+const record: TeammateRecord = {
+  agentId,
+  name,
+  role,
+  agentType: subagentType,
+  color,
+  backendType,
+  cwd,
+  subscriptions,
+  avatar: resolveAvatar(subagentType), // ← 治本：从包定义继承
+};
+teamConfig.members.push(record);
 ```
 
-验收标准：spawn 子代理后，团队 `config.json` 的 `members[]` 出现 `avatar` 字段且指向存在的 PNG，
-UI 中 8 个 worker 与领队一样显示头像。
+> 若宿主希望复用本仓库的权威解析（team.yaml key / plugin id / agent dir 三种 id 形式、团队头像兜底），
+> 可直接移植 `adapters/workbuddy/avatar_resolver.py` 的 `resolve_avatar()` / `team_avatar()` 为宿主语言等价实现。
+
+### 3.3 团队卡片头像
+宿主在渲染「团队」卡片时，应从 `plugin.json` 顶层 `avatar`（或 `team.yaml` 顶层 `avatar`，见本仓库 `team_avatar()`）取团队头像，保证领队 / worker / 团队三者一致。
+
+### 3.4 验收标准
+- spawn 子代理后，团队 `config.json` 的 `members[]` 出现 `avatar` 字段，且指向存在的 PNG；
+- 未声明 avatar 的子代理，`avatar` 为 `null` 而非抛错（容错）；
+- UI 中 8 个 worker 与领队、团队卡片均显示头像。
+
+### 3.5 包侧已验证（回归测试）
+包侧「单一真相源」契约由 `tests/p9_avatar_resolver_test.py` 锁定：9 个 agent × 3 种 id 形式均可解析、PNG 均存在、团队头像 `avatars/team.png` 存在且 `team_avatar()` 可解析。宿主修复后可直接生效，无需改包数据。
 
 ## 4. 复验命令
 
@@ -61,5 +101,6 @@ python adapters/workbuddy/avatar_resolver.py fde-lead           # -> avatars/fde
 ## 5. 关联
 
 - `harness_defect_displayname.md`（原验证报告，含命名+头像双不继承）
-- `adapters/workbuddy/avatar_resolver.py`（接入点）
+- `adapters/workbuddy/avatar_resolver.py`（接入点，`resolve_avatar()` / `team_avatar()`）
+- `tests/p9_avatar_resolver_test.py`（包侧单一真相源回归测试）
 - `team.yaml` / `agents/*/SKILL.md` / `avatars/`（数据源）

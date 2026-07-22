@@ -3,9 +3,10 @@
 The FDE package declares each agent's avatar in two places:
 
 * source of truth : ``team.yaml``
-  (``secretary.avatar`` and ``agents.<key>.avatar``)
+  (``secretary.avatar`` and ``agents.<key>.avatar`` for sub-agents;
+  top-level ``avatar`` for the team card)
 * built WorkBuddy plugin : ``.codebuddy-plugin/plugin.json``
-  (``members[].avatar``)
+  (``members[].avatar``; top-level ``avatar`` for the team card)
 
 WorkBuddy's runtime, when it SPAWNS a sub-agent (Agent tool / TeamCreate
 spawn), currently does NOT copy the agent's avatar into the teammate's display
@@ -52,6 +53,8 @@ _AGENT_KEY_RE = re.compile(
 )
 _ROLE_CARD_RE = re.compile(r"^\s*role_card:\s*agents/([\w-]+)/SKILL\.md")
 _AVATAR_RE = re.compile(r"^\s*avatar:\s*(\S+)")
+# Top-level (unindented) avatar in team.yaml -> team card avatar.
+_TOP_AVATAR_RE = re.compile(r"^avatar:\s*(\S+)")
 
 
 def _repo_root(start: str = __file__) -> str:
@@ -157,10 +160,47 @@ def resolve_avatar(agent_id: str, repo_root: Optional[str] = None) -> Optional[s
     return None
 
 
+def _load_team_yaml_top_avatar(repo_root: str) -> Optional[str]:
+    """Read the team-level avatar declared at the top of team.yaml.
+
+    The sub-agent avatars live under ``secretary.avatar`` / ``agents.<key>.avatar``;
+    the *team* avatar is a sibling top-level field (no indentation), so it is not
+    captured by :func:`_load_team_yaml_map` (which only tracks block-scoped keys).
+    """
+    path = os.path.join(repo_root, "team.yaml")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = _TOP_AVATAR_RE.match(line.rstrip("\n"))
+                if m:
+                    return m.group(1)
+    except OSError:
+        return None
+    return None
+
+
 def team_avatar(repo_root: Optional[str] = None) -> Optional[str]:
-    """Return the team-level avatar (plugin.json top-level ``avatar``)."""
+    """Return the team-level avatar.
+
+    Resolution order (so the team card renders once the host is patched):
+    1. built plugin.json top-level ``avatar`` (used when running from a built
+       WorkBuddy plugin that carries the field),
+    2. team.yaml top-level ``avatar`` (the platform-agnostic source of truth),
+    3. conventional ``avatars/team.png`` on disk as a last-resort fallback.
+    """
     repo_root = repo_root or _repo_root()
-    return _load_plugin_map(repo_root).get("__team__")
+    top = _load_plugin_map(repo_root).get("__team__")
+    if top:
+        return top
+    top = _load_team_yaml_top_avatar(repo_root)
+    if top:
+        return top
+    default = os.path.join("avatars", "team.png")
+    if os.path.exists(os.path.join(repo_root, default)):
+        return default
+    return None
 
 
 if __name__ == "__main__":

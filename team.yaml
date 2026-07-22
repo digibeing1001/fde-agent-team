@@ -8,6 +8,7 @@
 team_id: fde-agent-team
 version: "2.1.0"
 name: "FDE Agent Team"
+avatar: avatars/team.png  # 团队级头像（单一真相源；宿主修复后用于团队卡片展示）
 philosophy: "卖结果不卖软件 - Palantir FDE 模式的 AI Agent 化实现"
 
 # ============ Secretary Agent (编排者) ============
