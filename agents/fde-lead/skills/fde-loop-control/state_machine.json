@@ -1,16 +1,24 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "state_machine_id": "fde-loop-control",
-  "version": "2.1",
-  "description": "FDE 四步控制流状态机 - 从 prompt 描述升级为程序化 state machine。每个状态有明确的 next 和 gate 检查，状态转换必须输出对应 artifact（未输出则阻断）。",
+  "version": "2.2",
+  "description": "FDE 四步宏观控制流 + v2.2 逐步评分返工与用户反馈闭环。每个执行步骤必须由 FDE Lead 评分，通过后才能进入下一节点。",
   "initial_state": "context",
-  "terminal_states": ["done", "aborted"],
+  "terminal_states": [
+    "done",
+    "aborted"
+  ],
   "states": {
     "context": {
       "description": "第一阶段：上下文收集 - 通过 PM-Clarity Clarify 重述真问题",
       "agent": "fde-lead",
-      "required_artifacts": ["reframed_problem.json"],
-      "actions": ["pm_clarity_clarify", "extract_user_constraints"],
+      "required_artifacts": [
+        "reframed_problem.json"
+      ],
+      "actions": [
+        "pm_clarity_clarify",
+        "extract_user_constraints"
+      ],
       "transitions": [
         {
           "to": "decide",
@@ -23,8 +31,13 @@
     "decide": {
       "description": "第二阶段：决策 - 输出完整 JSON execution_plan",
       "agent": "fde-lead",
-      "required_artifacts": ["execution_plan.json"],
-      "actions": ["plan_then_execute", "task_decomposition"],
+      "required_artifacts": [
+        "execution_plan.json"
+      ],
+      "actions": [
+        "plan_then_execute",
+        "task_decomposition"
+      ],
       "transitions": [
         {
           "to": "act",
@@ -42,8 +55,14 @@
     "act": {
       "description": "第三阶段：执行 - 按计划逐步调用子 agent",
       "agent": "fde-lead (orchestrator) + worker agents",
-      "required_artifacts": ["step_results.json"],
-      "actions": ["call_worker_agent", "pass_user_constraints", "collect_results"],
+      "required_artifacts": [
+        "step_results.json"
+      ],
+      "actions": [
+        "call_worker_agent",
+        "pass_user_constraints",
+        "collect_results"
+      ],
       "sub_steps": {
         "type": "iterative",
         "iterator": "plan[]",
@@ -86,8 +105,15 @@
     "evaluate": {
       "description": "第四阶段：评估 - 综合结果，QA 审查。失败时按多 Agent 失败模式分类法显式诊断根因。",
       "agent": "fde-lead + qa-agent",
-      "required_artifacts": ["evaluation_report.json"],
-      "actions": ["synthesize_results", "qa_review", "user_constraint_compliance_check", "failure_classification"],
+      "required_artifacts": [
+        "evaluation_report.json"
+      ],
+      "actions": [
+        "synthesize_results",
+        "qa_review",
+        "user_constraint_compliance_check",
+        "failure_classification"
+      ],
       "failure_taxonomy": {
         "categories": {
           "task_verification_failure": {
@@ -137,7 +163,9 @@
       "type": "human_gate",
       "blocking": true,
       "implementation": "interrupt_before (LangGraph) / pause (Coze) / await_confirmation (Trae) / state_guard.py (Hermes)",
-      "required_artifacts": ["gate_protocol.json"],
+      "required_artifacts": [
+        "gate_protocol.json"
+      ],
       "gate_protocol_schema": {
         "gate_name": "string",
         "current_step": "string",
@@ -181,7 +209,9 @@
         "violation_handling": "若 QA 收到了生成 trace，必须主动拒绝并要求重发仅含最终产出物的输入"
       },
       "implementation": "call_qa_agent(review_dimensions=[quality, red_line, ai_smell, completeness, test_coverage, version_diff, user_constraint_compliance])",
-      "required_artifacts": ["qa_review_report.json"],
+      "required_artifacts": [
+        "qa_review_report.json"
+      ],
       "validation": {
         "pre_transition_check": "qa_review_report.json 必须存在 AND qa_verdict 已判定 AND qa_review_report.independence_attested == true",
         "executor_class": "A 类: LangGraph conditional_edge / B 类: Coze 条件节点 / C 类: adapters/state_guard.py",
@@ -217,7 +247,9 @@
       "type": "agent_gate",
       "blocking": true,
       "implementation": "call_legal_agent(channel=triage)",
-      "required_artifacts": ["legal_review_draft.json"],
+      "required_artifacts": [
+        "legal_review_draft.json"
+      ],
       "validation": {
         "pre_transition_check": "legal_review_draft.json 必须存在 AND legal_verdict 已判定",
         "executor_class": "A 类: LangGraph conditional_edge / B 类: Coze 条件节点 / C 类: adapters/state_guard.py",
@@ -243,14 +275,20 @@
     "done": {
       "description": "终态：任务完成",
       "agent": null,
-      "required_artifacts": ["final_delivery.json"],
+      "required_artifacts": [
+        "final_delivery.json"
+      ],
       "transitions": []
     },
     "failed": {
       "description": "终态：任务失败（重试超限/预算超支/QA失败）",
       "agent": "coach-agent",
-      "required_artifacts": ["failure_report.json"],
-      "actions": ["coach_retrospective"],
+      "required_artifacts": [
+        "failure_report.json"
+      ],
+      "actions": [
+        "coach_retrospective"
+      ],
       "transitions": [
         {
           "to": "context",
@@ -262,7 +300,9 @@
     "aborted": {
       "description": "终态：用户主动中止",
       "agent": null,
-      "required_artifacts": ["abort_reason.json"],
+      "required_artifacts": [
+        "abort_reason.json"
+      ],
       "transitions": []
     }
   },
@@ -288,7 +328,14 @@
     "violation_handling": "未输出 gate_protocol.json 直接进入下一状态 = 任务失败，回退到 gate 重新执行",
     "platform_execution_layers": {
       "A_class_native": {
-        "platforms": ["langgraph", "dify_v1.13_plus", "microsoft_agent_framework", "claude_code", "microsoft_copilot_studio", "aws_bedrock_multi_agent"],
+        "platforms": [
+          "langgraph",
+          "dify_v1.13_plus",
+          "microsoft_agent_framework",
+          "claude_code",
+          "microsoft_copilot_studio",
+          "aws_bedrock_multi_agent"
+        ],
         "executor": {
           "langgraph": "StateGraph conditional_edge + interrupt_before + Checkpointer 状态持久化",
           "dify_v1.13_plus": "workflow HITL 节点（v1.13.0+ 原生支持）",
@@ -301,13 +348,22 @@
         "config_field": "validation.executor_class = A 类"
       },
       "B_class_conditional": {
-        "platforms": ["coze", "feishu_bot", "tencent_yuanqi"],
+        "platforms": [
+          "coze",
+          "feishu_bot",
+          "tencent_yuanqi"
+        ],
         "executor": "workflow 条件节点 + 人工确认节点",
         "reliability": "high",
         "config_field": "validation.executor_class = B 类"
       },
       "C_class_wrapper": {
-        "platforms": ["hermes_openclaw", "trae", "workbuddy", "feishu"],
+        "platforms": [
+          "hermes_openclaw",
+          "trae",
+          "workbuddy",
+          "feishu"
+        ],
         "executor": "adapters/state_guard.py 包装器（拦截非法状态转换）",
         "reliability": "medium_high",
         "config_field": "validation.executor_class = C 类",
@@ -323,5 +379,39 @@
         }
       }
     }
+  },
+  "step_loop_v22": {
+    "runtime": "adapters/loop_orchestrator.py",
+    "policy": "config/loop-policy.json",
+    "schema": "docs/loop-run-schema.json",
+    "lifecycle": [
+      "plan",
+      "provision_independent_agents",
+      "execute_step",
+      "lead_score",
+      "rework_or_advance",
+      "deliver",
+      "user_accept_or_rollback",
+      "retrospect"
+    ],
+    "pass_thresholds": {
+      "high": 90,
+      "low": 75,
+      "medium": 80
+    },
+    "scorer": "fde-lead",
+    "rework_target": "same_agent_instance",
+    "default_max_reworks": 3,
+    "on_user_rejection": "lead_must_identify_root_steps_then_invalidate_roots_and_downstream",
+    "tracking": [
+      "status",
+      "rubric_scores",
+      "weighted_score",
+      "attempt_count",
+      "rework_count",
+      "invalidation_count",
+      "final_pass",
+      "event_log"
+    ]
   }
 }

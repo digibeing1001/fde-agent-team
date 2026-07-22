@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fde-agent-team.dev/schemas/loop-run-v2.2.json",
+  "title": "FDE Agent Team Loop Run",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_id",
+    "objective",
+    "status",
+    "team_manifest",
+    "steps",
+    "event_log"
+  ],
+  "properties": {
+    "schema_version": { "const": "2.2" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "objective": { "type": "string", "minLength": 1 },
+    "status": {
+      "enum": ["planned", "running", "blocked", "awaiting_user_acceptance", "accepted"]
+    },
+    "team_manifest": {
+      "type": "object",
+      "required": ["lead", "workers", "selection_reason"]
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "step_id", "agent", "depends_on", "status", "pass_score",
+          "attempt_count", "rework_count", "score_history", "final_pass"
+        ],
+        "properties": {
+          "status": {
+            "enum": ["pending", "ready", "running", "scoring", "rework", "passed", "blocked"]
+          },
+          "pass_score": { "type": "number", "minimum": 0, "maximum": 100 },
+          "attempt_count": { "type": "integer", "minimum": 0 },
+          "rework_count": { "type": "integer", "minimum": 0 },
+          "invalidation_count": { "type": "integer", "minimum": 0 },
+          "score_history": { "type": "array" },
+          "final_pass": { "type": "boolean" }
+        }
+      }
+    },
+    "event_log": { "type": "array" },
+    "user_feedback_history": { "type": "array" },
+    "retrospective_queue": { "type": "array" }
+  }
+}
