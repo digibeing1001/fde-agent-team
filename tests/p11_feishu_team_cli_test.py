@@ -1,4 +1,8 @@
 import unittest
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from adapters.agent_team_runtime import AgentTeamRuntime
 from adapters.feishu.team_cli import FeishuTeamProvisioner, LarkCLI, SocraticIntake
