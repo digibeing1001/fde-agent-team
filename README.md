@@ -1,221 +1,178 @@
 # FDE Agent Team
 
-## v2.2：可评分 Loop + 飞书独立 Agent 团队
+> 把一支能够理解业务、动手落地、独立质检并持续复盘的 FDE 咨询团队，装进你正在使用的 Agent 工具里。
 
-本版本把执行质量控制升级为程序化闭环：FDE Lead 动态拆解路径和组队，每个步骤完成后按风险阈值评分；未达标返回原 Agent 返工，全部通过后才交付用户。用户拒绝时定位根因步骤并使其下游失效；用户接受后复盘所有曾低分节点。完整状态、分数、尝试与返工均可审计。
+FDE Agent Team 不是九张角色提示词，也不是“让一个大模型轮流扮演九个人”。它是一套可运行、可评分、可返工、可追踪的 AI 咨询交付系统：用户只面对团队统筹官，统筹官澄清真正问题、动态组建独立 Agent 团队、规划依赖路径，并让每一步经过质量门后再继续。
 
-飞书新增一键入口：`python -m adapters.feishu.team_cli bootstrap ...`。飞书只安装一个团队统筹官（秘书）机器人，但 Echo、Delta、QA 等仍是拥有独立实例 ID、任务队列、状态和产出流的 Agent。秘书创建项目群，将用户与 Agent 团队绑定到群组，发布角色名册，并以每轮一个关键问题完成 FDE 项目澄清；上下文齐备后自动激活团队、规划和执行。
+## 它真正解决什么问题
 
-详见 [Loop 工作流](docs/loop-workflow-v2.2.md) 与 [飞书一键导入指南](docs/feishu-one-click-import.md)。
+很多 Agent 演示看起来像团队，实际仍是同一个上下文中的角色扮演：需求没有形成可验证基线，执行结果无人独立审查，失败以后不知道退回哪一步，换一个宿主工具后流程又完全变样。
 
----
+本项目把这些问题变成程序化约束：
 
-## WorkBuddy 继续执行增强
+- **从模糊想法到真实需求**：统筹官采用苏格拉底式追问，每轮只问一个关键问题，直到业务结果、使用者、成功指标、约束和证据来源清楚。
+- **真正独立的执行团队**：每个角色拥有独立实例 ID、上下文、任务队列、工作状态和产出流；统筹官不能把自己的内容伪装成专业 Agent 产出。
+- **每一步都可验收**：步骤必须声明预期产出、通过条件和风险等级；统筹官按统一 Rubric 评分，低分产出返回原 Agent 实例返工。
+- **用户不满意能够精确回退**：统筹官必须定位根因步骤，系统使该步骤及其所有下游结果失效，保留历史后重新执行。
+- **换宿主不换质量标准**：Claude Code、Codex、Gemini CLI、OpenClaw、Hermes 等只负责提供执行能力；评分、状态、回退和审计由同一个 portable kernel 强制。
+- **交付的是业务结果**：调研、需求、方案、原型、质量、合规、知识沉淀和复盘在同一条交付链上，不停留在聊天回答。
 
-2026-07 更新：新增 `adapters/workbuddy/workbuddy_adapter.py`，把 WorkBuddy 中的“用户已同意继续”转换为 StateGuard 提交、`resume_signal` 和可执行 `workbuddy_next_payload`。当用户确认下一步后，宿主应直接执行 `next_action`，而不是让 Agent 再回答“准备如何执行”后停下。
+## 一条完整的 FDE 交付 Loop
 
-> 一支按 Palantir FDE（前置部署工程师）模式组织的 AI Agent 团队，卖结果不卖软件——你给目标，团队按流程交付。
+```mermaid
+flowchart TD
+    U[用户发起 FDE 项目] --> Q[统筹官每轮追问一个关键问题]
+    Q --> P[拆解步骤、依赖和通过条件]
+    P --> T[动态创建独立 Agent 团队]
+    T --> E[专业 Agent 执行当前步骤]
+    E --> S[统筹官按 Rubric 评分]
+    S -->|低于阈值| R[返回原 Agent 实例返工]
+    R --> E
+    S -->|达到阈值| N{还有后续步骤?}
+    N -->|有| E
+    N -->|无| D[汇总交付用户]
+    D --> A{用户接受?}
+    A -->|接受| X[复盘低分节点并沉淀改进]
+    A -->|不接受| C[定位根因并失效下游结果]
+    C --> E
+```
 
----
+默认通过线为低风险 75、中风险 80、高风险 90；每步默认最多返工 3 次。完整规则见 [Loop Workflow v2.2](docs/loop-workflow-v2.2.md)。
 
-## 给谁用
+## 九个角色，不是九个称呼
 
-- **想落地 AI Agent 的创业团队**：有想法但缺人手，需要一支能从调研到交付全流程跑通的 AI 团队
-- **企业 IT / 数字化负责人**：需要把 AI 能力落地到具体业务场景，不是聊天 demo，是真能交付结果
-- **AI 工程师 / 全栈开发者**：想要一套可复用的 Agent 编排框架，有分工、有门控、不瞎跑
-- **咨询顾问 / 解决方案架构师**：需要快速调研、出方案、做原型、交付文档，按阶段推进
-
----
-
-## 作用是什么
-
-把一支「前置部署工程师团队」装进你的电脑——有 Lead 统筹，有感知/执行/交付/调研/知识/质检/法务/复盘 8 个专业角色，按固定流程接力干活。
-
-跟普通 AI 工具最大的不同：**普通 AI 你问一句答一句，答完就散了；这套团队有防代写协议——Lead 只负责调度不负责干活，每一步必须委派给专业 Agent 执行，每道关卡必须停下来等你确认。**
-
----
-
-## 功能有哪些
-
-### 全流程覆盖
-
-| 你遇到的问题 | 团队怎么帮你 |
-|---|---|
-| 「我想做 XX 但不知道从哪下手」 | FDE Lead 用苏格拉底式追问把模糊想法拆成具体任务，出 execution_plan |
-| 「需要调研行业/竞品/技术趋势」 | Research Agent 做行业调研、竞品分析、技术趋势追踪 |
-| 「有想法但没原型」 | Delta Agent 做技术选型、写代码、搭原型，做逆向检查 |
-| 「做完了不知道交付什么」 | Productize Agent 做交付物、复盘、知识沉淀、模板化 |
-| 「需求不清楚，总在变」 | Echo Agent 做感知、需求分析、信息去噪，把模糊变清晰 |
-| 「知识库乱成一锅粥」 | Knowledge Curator 管分类体系、标签规则、归档清理 |
-| 「交付物质量没底」 | QA Agent 做七维审查（质量/红线/AI 味/完整性/测试覆盖/版本对比/约束遵循） |
-| 「怕合规出问题」 | Legal Agent 做合同审查、隐私数据、产品合规、IP 和争议分流 |
-
-### 九个角色
-
-| 角色 | 类型 | 干什么 | 边界 |
-|---|---|---|---|
-| FDE Lead | 编排者 | 接活、出 plan、调度、盯 Gate | 禁止自己执行任何具体任务 |
-| Echo Agent | 生产者 | 感知、需求分析、信息去噪 | 仅做感知分析，不做执行 |
-| Delta Agent | 生产者 | 技术选型、写代码、搭原型 | 仅做执行，不做感知审查 |
-| Productize Agent | 生产者 | 交付物、复盘、知识沉淀 | 仅做交付，不做执行审查 |
-| Research Agent | 生产者 | 行业调研、竞品分析、技术趋势 | 仅做调研，不做执行 |
-| Knowledge Curator | 生产者 | 分类体系、标签规则、归档清理 | 管结构不产内容 |
-| QA Agent | 守门人 | 七维质量审查 | 独立于生产链，自己审自己是致命缺陷 |
-| Legal Agent | 守门人 | 合同、隐私、合规、IP、争议 | 输出审查草稿，不替代执业律师 |
-| Coach Agent | 守门人 | 评估、复盘、审计、认知投降检测 | 不参与交付，仅做评估 |
-
-### 四道门控
-
-| 门控 | 触发时机 | 做什么 |
+| 角色 | 责任 | 明确边界 |
 |---|---|---|
-| 阶段切换门 | 售前→调研→实施→交付→持续 | 必须用户确认才进下一阶段 |
-| 质量门 | 交付物产出后 | QA Agent 审查通过才进下一步 |
-| 法律门 | 涉及合同/隐私/IP 时 | Legal Agent 强制介入 |
-| 复盘门 | 项目/阶段结束 | Coach Agent 做复盘评估 |
+| FDE Lead / 团队统筹官 | 澄清、拆解、组队、评分、交付和回退 | 只编排，不代替专业角色生产产出 |
+| Echo Agent | 用户洞察、需求分析、信息去噪、需求追踪 | 不写实现代码 |
+| Delta Agent | 技术选型、原型、代码与逆向检查 | 不替 QA 审核自己 |
+| Productize Agent | 交付物、知识沉淀、模板化和复盘 | 不负责实现与独立质检 |
+| Research Agent | 行业、竞品、技术与证据调研 | 不把未验证信息写成事实 |
+| Knowledge Curator | 分类体系、标签、归档和知识结构 | 管结构，不伪造内容 |
+| QA Agent | 风险 Panel Review、证据认证和质量门 | 独立于生产链 |
+| Legal Agent | 合同、隐私、数据、IP 和产品合规分流 | 不替代执业律师作最终意见 |
+| Coach Agent | 团队评估、流程复盘和模型行为审计 | 不参与被评估产出的生产 |
 
----
+## 主流 Agent 兼容性
 
-## 优势是什么
+我们不宣称所有 Agent 工具原生能力相同。项目采用“宿主原生能力 + portable kernel”的组合来保证执行契约一致。
 
-### 1. 防代写协议 v2.2——Lead 只调度不干活
+| 优先级 | 平台 | 运行方式 |
+|---|---|---|
+| P0 | Claude Code | 原生 Agent Teams / subagents + FDE Loop 内核 |
+| P0 | OpenAI Codex | 并行线程、隔离 worktree、skills + FDE Loop 内核 |
+| P0 | Gemini CLI | 自定义 subagents、工具策略 + FDE Loop 内核 |
+| P0 | GitHub Copilot CLI / SDK | custom agents、subagent events + FDE Loop 内核 |
+| P0 | OpenCode | primary/subagents、Task 权限 + FDE Loop 内核 |
+| P0 | OpenClaw | 隔离 Agent、后台 subagents、持久 session + FDE Loop 内核 |
+| P0 | Hermes Agent | 并行委派、隔离终端 session + FDE Loop 内核 |
+| P0 | WorkBuddy | teammate feature probe + FDE Loop 内核 |
+| P1 | LangGraph、Google ADK、OpenAI Agents SDK、Microsoft Agent Framework、CrewAI | 可编程编排后端 |
+| P1/P2 | Cursor、Dify | 后台 Agent 或 Workflow API 桥 |
 
-这是这支团队最核心的设计。Lead 接到任务后**必须先出 execution_plan（JSON 格式），再按 plan 逐步委派给专业 Agent**。四条硬约束：
+详细的官方证据、限制和适配决策见 [主流 Agent 宿主兼容性调研](docs/compatibility-research-2026-07.md)。机器可读能力表位于 [host-capabilities.json](config/host-capabilities.json)。
 
-1. 输出格式锁：每步必须输出 `当前步骤 / 下一步 / 等待确认 / 已产出 / 通过条件`
-2. @call_* 占位符：Lead 只能调用 `call_*` 委派工具，不能直接执行任何任务
-3. self_check 四问：每步自检「我是在委派还是在代写」「我跳步了吗」「用户约束传了吗」「Gate 通过了吗」
-4. 第一轮强制 Plan：首次输出必须是合法 JSON execution_plan，禁止在输出 plan 前调用任何工具
+### 查看兼容矩阵
 
-**违反任一条 = 任务失败，从当前步骤重来。**
+```bash
+python -m adapters.compatibility.cli matrix
+python -m adapters.compatibility.cli check --host claude_code
+```
 
-### 2. 机械强制层——不只靠 prompt，靠代码保证
+### 为目标宿主生成角色包
 
-prompt 层的约束可能被 LLM 忽略，所以加了三层机械强制：
+```bash
+python -m adapters.compatibility.cli install \
+  --host claude_code \
+  --target /path/to/your/project
+```
 
-- **L1 状态机**（state_guard.py）：非法状态跳转直接阻断，LLM 说了不算
-- **L2 工具白名单**（tools.schema.json）：Lead 只可见 call_* 委派工具，执行类工具对 Lead 不可见
-- **L3 HITL 门**：Gate 处程序化 interrupt_before，不是靠 prompt 提醒
+支持生成原生或兼容角色定义的宿主包括：`claude_code`、`gemini_cli`、`github_copilot`、`opencode`、`codex`、`hermes_agent`、`openclaw`、`workbuddy` 和 `cursor`。
 
-### 3. 用户约束持久化——你说的话不会丢
+安装器默认拒绝覆盖已有文件。确认要替换时必须显式使用 `--mode overwrite`，避免破坏用户已经存在的规则、角色和个人数据。
 
-你给 Lead 的附加指令（「必须用国产模型」「预算不超过 X」「必须包含某案例」）会：
-- 存入工作包的 user_constraints 字段
-- 由适配器代码层自动注入到每个子 Agent 的 prompt 末尾（不依赖 LLM 自觉传递）
-- QA Agent 专门审查约束遵循情况
-- 注入失败 = 任务失败（fail_closed），不让子 Agent 无约束执行
+## 跨宿主一致性如何实现
 
-### 4. 平台无关——一套定义，多平台适配
+```text
+team.yaml（角色与边界）
+        │
+        ├── CompatibilityCompiler ──> 各宿主角色文件 / host manifest
+        │
+        └── Portable Kernel
+              ├── AgentTeamRuntime：独立实例、队列和身份
+              ├── ProjectCoordinator：规划、委派和自动推进
+              ├── LoopOrchestrator：评分、返工、验收和回退
+              └── JsonCommandBridge：统一 JSON 工作信封
+```
 
-team.yaml 是单一真相源，各平台适配器负责翻译：
-- A 类平台（LangGraph / Claude Code / Microsoft Agent Framework 等）：直接读 team.yaml + tools.schema.json
-- B 类平台（Coze / 飞书 Bot / 腾讯元器）：适配器翻译为平台特定格式
-- C 类平台（Hermes / OpenClaw / Trae / WorkBuddy）：适配器用 v2.2 协议在 prompt 层最佳努力执行
+无论宿主使用原生 teammate、subagent、后台任务还是外部 API，每个工作节点都必须返回同一种工作信封：产出、证据引用和约束遵循声明。纯文本“我已经完成”不能通过桥接层，更不能绕过评分门。
 
----
+## 飞书：用户只面对一个统筹官，背后是一支独立团队
 
-## 特点是什么
+飞书只安装一个团队统筹官机器人。统筹官创建项目群、加入用户、创建并绑定全部独立 Agent 实例、发布团队名册，并以“角色名 + Agent 实例签名”转发每个 Agent 的消息。
 
-- **有分工**：9 个角色各管一摊，Lead 只调度不干活，专业的事交给专业的 Agent
-- **有防代写**：四条硬约束 + self_check 四问，Lead 不能自己动手写东西
-- **有机械强制**：状态机阻断非法跳转 + 工具白名单限制 Lead 能力 + 程序化 HITL 门
-- **有门控**：四道关卡（阶段切换/质量/法律/复盘），过不了就停下
-- **有约束持久化**：用户附加指令代码层注入，不靠 LLM 自觉
-- **有四步干活法**：context → decide → act → evaluate，不会无限循环
-- **平台无关**：一套定义适配多个平台，不绑死某个工具
-- **可观测**：全链路 trace，每步谁干的、花了多少、有没有失败，查得到
+```powershell
+python -m adapters.feishu.team_cli bootstrap `
+  --config config/feishu-team.example.json `
+  --project-id fde-customer-onboarding `
+  --name "FDE｜客户入驻提效" `
+  --owner-open-id ou_owner
+```
 
----
+飞书原生成员列表中只有一个机器人，这是产品约束；专业角色仍是运行时中的独立 Agent，而不是统筹官的一组提示词。详见 [飞书一键导入指南](docs/feishu-one-click-import.md)。
 
-## 怎么用
-
-### 第一步：克隆仓库
+## 快速开始
 
 ```bash
 git clone https://github.com/digibeing1001/fde-agent-team.git
 cd fde-agent-team
+
+# 查看适配能力
+python -m adapters.compatibility.cli matrix
+
+# 运行新增核心测试
+python tests/p10_loop_orchestrator_test.py
+python tests/p11_feishu_team_cli_test.py
+python tests/p12_project_coordinator_test.py
+python tests/p13_compatibility_contract_test.py
 ```
 
-### 第二步：选择你的平台
-
-| 平台类型 | 代表平台 | 怎么用 |
-|---|---|---|
-| A 类（原生支持） | LangGraph / Claude Code / Microsoft Agent Framework | 直接读 team.yaml + tools.schema.json |
-| B 类（适配翻译） | Coze / 飞书 Bot / 腾讯元器 | 用 adapters/ 下的适配器翻译 |
-| C 类（prompt 层） | Hermes / OpenClaw / Trae / WorkBuddy | 用 v2.2 协议在 prompt 层最佳努力执行 |
-
-### 第三步：跟 FDE Lead 说一句话
+然后向 FDE Lead 描述一个 FDE 类型的咨询项目，例如：
 
 ```text
-帮我调研一下市面上的 AI Agent 编排框架，出一版选型建议。
+我们希望把企业客户从签约到第一次上线的周期缩短 30%，请组建团队推进。
 ```
+
+Lead 不会立即编造方案，而是先逐轮澄清关键上下文，再提交带依赖、产出和评分标准的执行路径。
+
+## 核心目录
 
 ```text
-我想做一个智能客服 Agent，从需求到原型帮我走一遍。
-```
-
-Lead 不会立刻动手，会先出 execution_plan（JSON），列出每一步交给谁、产出什么、Gate 在哪，你确认后才开干。
-
----
-
-## 目录结构
-
-```
 fde-agent-team/
-├── team.yaml                          # 平台无关单一真相源
-├── agents/                            # 9 个角色
-│   ├── fde-lead/SKILL.md              # Lead 角色卡（含 v2.2 防代写协议）
-│   ├── echo-agent/SKILL.md            # 感知分析
-│   ├── delta-agent/SKILL.md           # 执行原型
-│   ├── productize-agent/SKILL.md      # 交付复盘
-│   ├── research-agent/SKILL.md        # 调研
-│   ├── knowledge-curator/SKILL.md     # 知识管理
-│   ├── qa-agent/SKILL.md              # 质量审查
-│   ├── legal-agent/SKILL.md           # 法务审查
-│   └── coach-agent/SKILL.md           # 评估复盘
-├── adapters/                          # 平台适配器
-│   ├── base.py                        # 适配器基类
-│   ├── tier3_enforcer.py              # C 类平台 v2.2 协议强制器
-│   └── state_guard.py                 # 状态机守卫
-├── config/                            # 配置
-│   ├── tools.schema.json              # 工具白名单（tools_allow / tools_deny）
-│   └── output_enforcement.yaml        # 输出强制策略
-├── docs/                              # 文档
-│   ├── platform-adapter-spec.md       # 平台适配器接口规范
-│   └── cross-platform-deployment-guide.md  # 跨平台部署指南
-└── tests/                             # 测试（159 项全部通过）
+├── team.yaml                              # 平台无关的角色单一真相源
+├── agents/                                # Lead + 8 个专业 Agent
+├── adapters/
+│   ├── agent_team_runtime.py              # 独立 Agent 实例
+│   ├── project_coordinator.py             # 自动规划和执行协调
+│   ├── loop_orchestrator.py               # 评分、返工与用户反馈 Loop
+│   ├── compatibility/                     # 跨宿主能力表、编译器和 JSON 桥
+│   └── feishu/team_cli.py                 # 飞书一键导入与项目启动
+├── config/
+│   ├── host-capabilities.json             # 主流 Agent 能力矩阵
+│   ├── loop-policy.json                   # 评分策略
+│   └── feishu-team.example.json           # 飞书团队配置示例
+├── docs/                                  # 架构、调研和部署文档
+└── tests/                                 # 原有回归 + Loop/飞书/兼容性契约测试
 ```
 
----
+## 我们保证什么，不保证什么
 
-## 头像（Avatar）
+保证：在仓库 portable kernel 和适配器路径内，步骤状态、评分、返工、用户回退和审计的数据契约一致，并由 CI 持续验证。
 
-头像路径在两处声明，必须保持一致，且由 `avatars/` 目录下的 PNG 实际提供：
+不虚假保证：官方文档适配不等于所有产品版本、账户权限和操作系统已经现场认证。尤其是实验功能、私有产品和快速迭代的 CLI，安装时仍需执行 capability probe 和 smoke test。发现宿主缺少硬能力时，系统应 fail closed，而不是降级成看似成功的角色扮演。
 
-- `team.yaml`：`secretary.avatar` 与 `agents.<key>.avatar`（平台无关单一真相源）
-- `agents/*/SKILL.md` frontmatter：`avatar:`（生成 WorkBuddy 插件时的来源）
-- 运行时 WorkBuddy 插件 `.codebuddy-plugin/plugin.json` 的 `members[].avatar`（由上述两处生成）
+## License 与责任边界
 
-替换自定义头像要求：PNG（推荐）/JPG，512×512 px，单张 ≤ 500KB，放入 `avatars/` 并同步改上述两处路径。
-
-> ⚠️ **WorkBuddy 子代理头像显示**依赖宿主运行时（见 `docs/harness-subagent-avatar-fix.md`，缺陷号 WB-HARNESS-P0-001）：
-> 顶层专家（FDE Lead）读 `plugin.json` 顶层头像正常显示；spawn 出的子代理当前不继承头像，
-> 需宿主在注册 teammate 时调用 `adapters/workbuddy/avatar_resolver.py` 的 `resolve_avatar()`
-> 并把结果写入 teammate 展示元数据。专家包侧数据已完整，宿主修复后即可生效。
-
----
-
-## 更多文档
-
-- [team.yaml](team.yaml) —— 平台无关单一真相源，团队定义的权威文件
-- [docs/platform-adapter-spec.md](docs/platform-adapter-spec.md) —— 平台适配器接口规范
-- [docs/cross-platform-deployment-guide.md](docs/cross-platform-deployment-guide.md) —— 跨平台部署指南（A/B/C 类平台）
-- [config/tools.schema.json](config/tools.schema.json) —— 工具白名单配置
-- `agents/fde-lead/skills/fde-loop-control/state_machine.json` —— 状态机定义
-
----
-
-## License 与说明
-
-- 所有自写的角色文档和技能文件为原创
-- 方法论仅作设计参考，未复制代码
-- Legal Agent 输出审查草稿，**不替代执业律师**，最终外发仍需人类律师把关
+- 项目角色、运行时和技能文件为原创实现；外部项目仅作为方法和兼容性研究来源。
+- Legal Agent 只提供风险识别与审查草稿，不替代执业律师。
+- 接入外部模型、Agent、MCP 或企业系统时，使用者负责相应的数据权限、保留策略、费用和合规边界。
