@@ -20,9 +20,11 @@ from typing import Any, Callable, Mapping, Optional, Sequence
 
 try:
     from adapters.agent_team_runtime import AgentTeamRuntime, DEFAULT_ROLES
+    from adapters.durable_state_store import AtomicJsonStateStore
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from adapters.agent_team_runtime import AgentTeamRuntime, DEFAULT_ROLES
+    from adapters.durable_state_store import AtomicJsonStateStore
 
 
 FDE_PROJECT_TYPE = "fde_ai_consulting"
@@ -39,28 +41,43 @@ class FeishuCLIError(RuntimeError):
     """Raised when lark-cli returns an invalid or unsuccessful response."""
 
 
-class JsonFileStateStore:
-    """Small persistent StateStore used by the standalone CLI."""
+class JsonFileStateStore(AtomicJsonStateStore):
+    """Backward-compatible CLI store backed by atomic per-project snapshots.
+
+    A historical ``*.json`` path is mapped to a sibling ``*.d`` directory. If
+    the legacy monolithic file exists, its project/key values are migrated once
+    before the CLI serves requests.
+    """
 
     def __init__(self, path: str | Path):
-        self.path = Path(path)
+        requested = Path(path).expanduser()
+        self.legacy_path = requested if requested.suffix.lower() == ".json" else None
+        root = requested.with_suffix(".d") if self.legacy_path else requested
+        super().__init__(root)
+        self._migrate_legacy_file()
 
-    def get(self, project_id: str, key: str) -> Any:
-        data = self._read()
-        return copy.deepcopy(data.get(project_id, {}).get(key))
-
-    def set(self, project_id: str, key: str, value: Any) -> None:
-        data = self._read()
-        data.setdefault(project_id, {})[key] = copy.deepcopy(value)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    def _migrate_legacy_file(self) -> None:
+        if self.legacy_path is None or not self.legacy_path.exists():
+            return
+        marker_key = "legacy_feishu_team_state_json_v1"
+        if self.get("__migration__", marker_key) is not None:
+            return
+        legacy = json.loads(self.legacy_path.read_text(encoding="utf-8"))
+        if not isinstance(legacy, dict):
+            raise ValueError("legacy Feishu state must be a project mapping")
+        for project_id, values in legacy.items():
+            if not isinstance(values, dict):
+                raise ValueError(f"legacy Feishu project state must be an object: {project_id}")
+            for key, value in values.items():
+                self.set(str(project_id), str(key), value)
+        self.set(
+            "__migration__",
+            marker_key,
+            {
+                "source": str(self.legacy_path.resolve()),
+                "migrated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
         )
-
-    def _read(self) -> dict[str, Any]:
-        if not self.path.exists():
-            return {}
-        return json.loads(self.path.read_text(encoding="utf-8"))
 
 
 class LarkCLI:
@@ -342,7 +359,11 @@ def _load_config(path: str) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fde-feishu", description="FDE 飞书团队一键导入与项目启动")
-    parser.add_argument("--state", default=".fde/feishu-team-state.json")
+    parser.add_argument(
+        "--state",
+        default=".fde/feishu-team-state.json",
+        help="耐久状态路径；*.json 兼容路径会写入同名 *.d 原子状态目录",
+    )
     parser.add_argument("--lark-cli", default="lark-cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
 

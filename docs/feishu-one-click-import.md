@@ -49,7 +49,7 @@ python -m adapters.feishu.team_cli answer `
 
 ## 分步调用
 
-也可以先执行 `import-team --config ...`，后续每个项目单独执行 `start-project ...`。状态默认保存在 `.fde/feishu-team-state.json`，可用全局参数 `--state` 指定其他位置。
+也可以先执行 `import-team --config ...`，后续每个项目单独执行 `start-project ...`。全局参数 `--state` 默认仍接受 `.fde/feishu-team-state.json`，实际数据会以原子化的逐项目快照写入同名 `.d` 目录；若检测到旧版单文件状态，会自动完成一次迁移。
 
 ## 安全边界
 

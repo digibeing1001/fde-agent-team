@@ -1,8 +1,7 @@
 # CI: keep the FDE package contracts from silently breaking.
 #
 # Runs on every push to main and on every pull request. No pip dependencies:
-# every test under tests/ is pure stdlib + the repo's own adapters/ package,
-# so the job only needs the system python3 that ships with ubuntu-latest.
+# every test under tests/ is pure stdlib + the repo's own adapters/ package.
 #
 # The headline guard is P9 (tests/p9_avatar_resolver_test.py): it locks the
 # single-source-of-truth avatar contract for WB-HARNESS-P0-001, so a future
@@ -23,8 +22,12 @@ permissions:
 
 jobs:
   test:
-    name: Run test suite
+    name: Run test suite (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,7 +35,24 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
+
+      - name: Compile Python runtime
+        run: python3 -m compileall -q adapters tests
+
+      - name: Validate JSON contracts
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          files = sorted(Path(".").rglob("*.json"))
+          for path in files:
+              with path.open(encoding="utf-8") as handle:
+                  json.load(handle)
+              print(f"VALID {path}")
+          print(f"Validated {len(files)} JSON files")
+          PY
 
       - name: Discover and run all *_test.py suites
         run: |
@@ -60,3 +80,6 @@ jobs:
         if: always()
         run: |
           echo "::notice::P9 (avatar single-source-of-truth, WB-HARNESS-P0-001) is part of the suite above. Keep team.yaml / agents/*/SKILL.md avatar entries in sync or this job turns red."
+
+      - name: Check latest commit whitespace
+        run: git diff-tree --check HEAD^ HEAD

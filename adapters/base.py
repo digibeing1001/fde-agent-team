@@ -158,6 +158,7 @@ def call_worker_agent_wrapper(
     work_package_constraints: dict,
     role_card_loader: Callable[[str], str],
     invoke_sub_agent_fn: Callable[[str, dict], dict],
+    usage_recorder: Optional[Callable[..., Any]] = None,
 ):
     """
     适配器拦截 call_* 工具调用的统一入口（v2.1 P3 修正参考实现）。
@@ -189,7 +190,9 @@ def call_worker_agent_wrapper(
     constraints_block = WorkPackageConstraintsMerger.format_constraints_block(merged)
     full_prompt = base_prompt + constraints_block
 
-    # 4. 调用子 agent
+    # 4. 由宿主代码记录真实工具调用；不要接受模型自报用量。
+    if usage_recorder is not None:
+        usage_recorder(tool_calls=1)
     result = invoke_sub_agent_fn(full_prompt, tool_args)
 
     # 5. 在结果中标注约束已注入（供 QA 审查）
