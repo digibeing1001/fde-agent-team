@@ -1,0 +1,62 @@
+# CI: keep the FDE package contracts from silently breaking.
+#
+# Runs on every push to main and on every pull request. No pip dependencies:
+# every test under tests/ is pure stdlib + the repo's own adapters/ package,
+# so the job only needs the system python3 that ships with ubuntu-latest.
+#
+# The headline guard is P9 (tests/p9_avatar_resolver_test.py): it locks the
+# single-source-of-truth avatar contract for WB-HARNESS-P0-001, so a future
+# edit that drops/mistypes an `avatar:` entry can never reach main unseen.
+# The other suites (P6/P7/P8/R2) run too, because guarding only one contract
+# would leave the rest just as fragile for free.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run test suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Discover and run all *_test.py suites
+        run: |
+          set -euo pipefail
+          failed=0
+          for t in tests/*_test.py; do
+            [ -f "$t" ] || continue
+            echo "=================================================="
+            echo "RUN  $t"
+            echo "=================================================="
+            if python3 "$t"; then
+              echo "PASS $t"
+            else
+              echo "FAIL $t"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::One or more test suites failed — blocking merge."
+            exit 1
+          fi
+          echo "All test suites passed."
+
+      - name: Highlight the avatar contract guard (P9)
+        if: always()
+        run: |
+          echo "::notice::P9 (avatar single-source-of-truth, WB-HARNESS-P0-001) is part of the suite above. Keep team.yaml / agents/*/SKILL.md avatar entries in sync or this job turns red."
