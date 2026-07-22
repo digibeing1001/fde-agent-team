@@ -1,5 +1,15 @@
 # FDE Agent Team
 
+## v2.2：可评分 Loop + 飞书独立 Agent 团队
+
+本版本把执行质量控制升级为程序化闭环：FDE Lead 动态拆解路径和组队，每个步骤完成后按风险阈值评分；未达标返回原 Agent 返工，全部通过后才交付用户。用户拒绝时定位根因步骤并使其下游失效；用户接受后复盘所有曾低分节点。完整状态、分数、尝试与返工均可审计。
+
+飞书新增一键入口：`python -m adapters.feishu.team_cli bootstrap ...`。飞书只安装一个团队统筹官（秘书）机器人，但 Echo、Delta、QA 等仍是拥有独立实例 ID、任务队列、状态和产出流的 Agent。秘书创建项目群，将用户与 Agent 团队绑定到群组，发布角色名册，并以每轮一个关键问题完成 FDE 项目澄清；上下文齐备后自动激活团队、规划和执行。
+
+详见 [Loop 工作流](docs/loop-workflow-v2.2.md) 与 [飞书一键导入指南](docs/feishu-one-click-import.md)。
+
+---
+
 ## WorkBuddy 继续执行增强
 
 2026-07 更新：新增 `adapters/workbuddy/workbuddy_adapter.py`，把 WorkBuddy 中的“用户已同意继续”转换为 StateGuard 提交、`resume_signal` 和可执行 `workbuddy_next_payload`。当用户确认下一步后，宿主应直接执行 `next_action`，而不是让 Agent 再回答“准备如何执行”后停下。

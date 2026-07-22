@@ -1,12 +1,12 @@
 # FDE Agent Team - 平台无关单一真相源
-# 版本: 2.1.0
-# 核算时间: 2026-07-06
+# 版本: 2.2.0
+# 核算时间: 2026-07-23
 #
 # 本文件是平台无关的 agent team 定义，各平台适配器（adapters/）负责翻译为平台特定格式。
 # Hermes/OpenClaw 保持向后兼容（读 SKILL.md + agents/ 目录），其他平台读本文件 + tools.schema.json。
 
 team_id: fde-agent-team
-version: "2.1.0"
+version: "2.2.0"
 name: "FDE Agent Team"
 avatar: avatars/team.png  # 团队级头像（单一真相源；宿主修复后用于团队卡片展示）
 philosophy: "卖结果不卖软件 - Palantir FDE 模式的 AI Agent 化实现"
@@ -21,16 +21,22 @@ secretary:
   tools_schema: config/tools.schema.json
   flow: plan_then_execute  # 强制 Plan-then-Execute
   output_enforcement: config/output_enforcement.yaml  # v2.1 P2 修正：从 response_format: json_schema 改为三层降级策略引用
+  loop_runtime: adapters/loop_orchestrator.py
+  project_coordinator: adapters/project_coordinator.py
+  independent_agent_runtime: adapters/agent_team_runtime.py
+  feishu_one_click_cli: adapters/feishu/team_cli.py
   hard_rules:
     - "禁止自己执行检索/写代码/写PRD/写文章等具体任务，必须通过 call_* 工具委派"
     - "首次输出必须是合法 JSON execution_plan，禁止在输出 plan 前调用任何工具"
     - "用户附加指令必须原样传给子 agent 的 user_constraints 字段"
     - "执行中不允许重新规划（除非显式调用 replan 工具）"
     - "每步必须完成后才能进下一步，遇 Gate 必须停下等用户确认"
+    - "每个步骤提交后必须由 fde-lead 按 Rubric 评分，低于阈值退回原 Agent 实例返工"
+    - "飞书侧只有一个统筹官机器人，但执行角色必须创建为拥有独立状态和队列的 Agent 实例"
   sub_skills:
     - id: fde-loop-control
-      version: "2.1"
-      change: "从 prompt 描述升级为 state_machine.json 强制约束"
+      version: "2.2"
+      change: "新增逐步评分、原节点返工、用户验收回退和完整审计状态"
     - id: fde-work-package
       version: "2.1"
       change: "从 ASCII 文本模板升级为 work-package-schema.json"
@@ -58,7 +64,7 @@ agents:
     role_card: agents/echo-agent/SKILL.md
     avatar: avatars/echo-analyst.png
     tool_name: call_echo_agent
-    skills: [echo-observation-extract, echo-need-analysis, echo-info-denoise]
+    skills: [echo-observation-extract, echo-need-analysis, echo-info-denoise, echo-requirements-traceability]
     sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}
     boundary: "仅做感知/分析，不做执行/写代码/写报告"
 
@@ -109,6 +115,7 @@ agents:
     role_card: agents/qa-agent/SKILL.md
     avatar: avatars/qa-gatekeeper.png
     tool_name: call_qa_agent
+    skills: [qa-risk-panel-review, qa-evidence-certification]
     sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}
     boundary: "独立于生产链，自己审自己是致命缺陷"
     review_dimensions_v21:
@@ -145,6 +152,15 @@ flow:
   type: state_machine
   definition: agents/fde-lead/skills/fde-loop-control/state_machine.json
   four_step: [context, decide, act, evaluate]
+  step_loop_v22:
+    runtime: adapters/loop_orchestrator.py
+    policy: config/loop-policy.json
+    schema: docs/loop-run-schema.json
+    scorer: fde-lead
+    thresholds: {low: 75, medium: 80, high: 90}
+    default_max_reworks: 3
+    user_rejection: "invalidate_root_and_downstream"
+    user_acceptance: "retrospect_previously_failed_nodes"
   gates:
     - gate_name: "阶段切换"
       trigger: "售前→调研→实施→交付→持续"
@@ -236,6 +252,13 @@ platform_compat:
   workbuddy:
     mode: config
     adapter: adapters/workbuddy/
+  feishu:
+    mode: independent_agents_shared_bot
+    adapter: adapters/feishu/team_cli.py
+    visible_bot_count: 1
+    visible_bot_role: fde-lead
+    project_type: fde_ai_consulting
+    socratic_questions_per_turn: 1
 
 # ============ 依赖抽象 ============
 platform_abstractions:

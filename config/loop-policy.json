@@ -1,0 +1,17 @@
+{
+  "version": "2.2",
+  "score_thresholds": {
+    "low": 75,
+    "medium": 80,
+    "high": 90
+  },
+  "max_reworks_per_step": 3,
+  "rubric": {
+    "goal_alignment": 0.25,
+    "completeness": 0.2,
+    "evidence": 0.15,
+    "execution_quality": 0.2,
+    "safety_compliance": 0.1,
+    "user_constraints": 0.1
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "visible_bot_role": "fde-lead",
+  "roles": [
+    "echo",
+    "delta",
+    "productize",
+    "research",
+    "knowledge-curator",
+    "qa",
+    "legal",
+    "coach"
+  ],
+  "worker_bot_app_ids": []
+}
