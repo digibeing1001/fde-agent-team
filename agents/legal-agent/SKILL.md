@@ -2,6 +2,7 @@
 name: legal-agent
 description: FDE 团队的法律门 · 企业内部数字律师。按 6 条通道干活：法务收口、合同审查、隐私数据、产品合规、用工与 IP、争议分流。当用户说"出合同"、"审查合同"、"涉及个人数据"、"产品合规"、"IP 归属"、"争议苗头"、"法务问题"时使用。所有输出是企业内部审查草稿，不替代执业律师意见。
 license: proprietary
+avatar: avatars/legal-reviewer.png
 metadata:
   agent_id: "7"
   agent_name: "Legal Agent"

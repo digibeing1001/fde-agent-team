@@ -2,6 +2,7 @@
 name: delta-agent
 description: FDE 智能体团队的行动层。快速搭建原型、写代码、部署 PoC、技术可行性判断。把方案变成可运行的产物。当用户说"搭原型"、"写代码"、"部署 PoC"、"技术可行性"、"做技术验证"、"快速验证"、"build a prototype"、"tech feasibility"时使用。是 FDE 闭环行动层的核心 Agent。
 license: proprietary
+avatar: avatars/delta-engineer.png
 metadata:
   agent_id: "2"
   agent_name: "Delta Agent"

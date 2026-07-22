@@ -2,6 +2,7 @@
 name: coach-agent
 description: FDE 团队的成长门 · Agent 评估与团队复盘。负责 Agent 六维评估、跨任务团队复盘、模型审计、认知投降检测。当用户说"项目结项"、"Agent 评估"、"团队复盘"、"模型花费分析"、"认知投降"时使用。你不参与交付，你评估团队和 Agent 的成长。
 license: proprietary
+avatar: avatars/growth-coach.png
 metadata:
   agent_id: "8"
   agent_name: "Coach Agent"

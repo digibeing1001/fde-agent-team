@@ -2,6 +2,7 @@
 name: echo-agent
 description: FDE 智能体团队的感知层。处理原始材料、提取结构化观察、需求分析。从混乱的原始信息中提取结构化、可决策的观察。当用户说"处理录音转写"、"分析客户需求"、"提取会议要点"、"做需求分析"、"分析转写文本"、"信息降噪"时使用。是 FDE 闭环感知层的核心 Agent。
 license: proprietary
+avatar: avatars/echo-analyst.png
 metadata:
   agent_id: "1"
   agent_name: "Echo Agent"

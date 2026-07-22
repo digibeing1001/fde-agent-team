@@ -16,6 +16,7 @@ secretary:
   name: "FDE Lead"
   role: orchestrator
   role_card: agents/fde-lead/SKILL.md
+  avatar: avatars/fde-agent-team-team-lead.png
   tools_schema: config/tools.schema.json
   flow: plan_then_execute  # 强制 Plan-then-Execute
   output_enforcement: config/output_enforcement.yaml  # v2.1 P2 修正：从 response_format: json_schema 改为三层降级策略引用
@@ -54,6 +55,7 @@ agents:
     name: "Echo Agent"
     type: producer
     role_card: agents/echo-agent/SKILL.md
+    avatar: avatars/echo-analyst.png
     tool_name: call_echo_agent
     skills: [echo-observation-extract, echo-need-analysis, echo-info-denoise]
     sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}
@@ -63,6 +65,7 @@ agents:
     name: "Delta Agent"
     type: producer
     role_card: agents/delta-agent/SKILL.md
+    avatar: avatars/delta-engineer.png
     tool_name: call_delta_agent
     skills: [delta-prototype-build, delta-tech-select, delta-code-impl, delta-inversion-check]
     sla: {expected: "2h", timeout: "8h", fallback: "gpt-4o"}
@@ -72,6 +75,7 @@ agents:
     name: "Productize Agent"
     type: producer
     role_card: agents/productize-agent/SKILL.md
+    avatar: avatars/productize-specialist.png
     tool_name: call_productize_agent
     skills: [productize-delivery, productize-retrospective, productize-knowledge, productize-template]
     sla: {expected: "1h", timeout: "4h", fallback: "gpt-4o"}
@@ -81,6 +85,7 @@ agents:
     name: "Research Agent"
     type: producer
     role_card: agents/research-agent/SKILL.md
+    avatar: avatars/research-analyst.png
     tool_name: call_research_agent
     skills: [research-industry, research-competitive, research-tech-trend]
     sla: {expected: "1h", timeout: "4h", fallback: "gpt-4o"}
@@ -91,6 +96,7 @@ agents:
     name: "Knowledge Curator"
     type: producer
     role_card: agents/knowledge-curator/SKILL.md
+    avatar: avatars/knowledge-curator.png
     tool_name: call_knowledge_curator
     skills: [kc-taxonomy, kc-tag-rules, kc-archive-clean]
     sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}
@@ -100,6 +106,7 @@ agents:
     name: "QA Agent"
     type: gatekeeper
     role_card: agents/qa-agent/SKILL.md
+    avatar: avatars/qa-gatekeeper.png
     tool_name: call_qa_agent
     sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}
     boundary: "独立于生产链，自己审自己是致命缺陷"
@@ -116,6 +123,7 @@ agents:
     name: "Legal Agent"
     type: gatekeeper
     role_card: agents/legal-agent/SKILL.md
+    avatar: avatars/legal-reviewer.png
     tool_name: call_legal_agent
     skills: [legal-triage, legal-contract-review, legal-privacy-data, legal-product-compliance, legal-employment-ip, legal-dispute-triage]
     sla: {expected: "1h", timeout: "4h", fallback: "gpt-4o"}
@@ -125,6 +133,7 @@ agents:
     name: "Coach Agent"
     type: gatekeeper
     role_card: agents/coach-agent/SKILL.md
+    avatar: avatars/growth-coach.png
     tool_name: call_coach_agent
     skills: [coach-agent-evaluation, coach-team-retrospective, coach-model-audit, coach-cognitive-surrender]
     sla: {expected: "30min", timeout: "2h", fallback: "gpt-4o"}

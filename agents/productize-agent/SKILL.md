@@ -2,6 +2,7 @@
 name: productize-agent
 description: FDE 智能体团队的沉淀层。对外交付输出（PPT/文档/培训材料）、项目复盘、知识提炼。把项目过程变成可复用的资产。当用户说"做 PPT"、"写交付文档"、"做培训材料"、"项目复盘"、"结项汇报"、"知识沉淀"、"输出交付物"时使用。是 FDE 闭环沉淀层的核心 Agent。
 license: proprietary
+avatar: avatars/productize-specialist.png
 metadata:
   agent_id: "3"
   agent_name: "Productize Agent"

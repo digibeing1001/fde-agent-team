@@ -177,6 +177,23 @@ fde-agent-team/
 
 ---
 
+## 头像（Avatar）
+
+头像路径在两处声明，必须保持一致，且由 `avatars/` 目录下的 PNG 实际提供：
+
+- `team.yaml`：`secretary.avatar` 与 `agents.<key>.avatar`（平台无关单一真相源）
+- `agents/*/SKILL.md` frontmatter：`avatar:`（生成 WorkBuddy 插件时的来源）
+- 运行时 WorkBuddy 插件 `.codebuddy-plugin/plugin.json` 的 `members[].avatar`（由上述两处生成）
+
+替换自定义头像要求：PNG（推荐）/JPG，512×512 px，单张 ≤ 500KB，放入 `avatars/` 并同步改上述两处路径。
+
+> ⚠️ **WorkBuddy 子代理头像显示**依赖宿主运行时（见 `docs/harness-subagent-avatar-fix.md`，缺陷号 WB-HARNESS-P0-001）：
+> 顶层专家（FDE Lead）读 `plugin.json` 顶层头像正常显示；spawn 出的子代理当前不继承头像，
+> 需宿主在注册 teammate 时调用 `adapters/workbuddy/avatar_resolver.py` 的 `resolve_avatar()`
+> 并把结果写入 teammate 展示元数据。专家包侧数据已完整，宿主修复后即可生效。
+
+---
+
 ## 更多文档
 
 - [team.yaml](team.yaml) —— 平台无关单一真相源，团队定义的权威文件
